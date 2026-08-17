@@ -1,4 +1,4 @@
-package com.project.kitchendispatch.model;
+package com.project.kitchen_dispatch.model;
 
 import jakarta.persistence.*;
 import lombok.*;

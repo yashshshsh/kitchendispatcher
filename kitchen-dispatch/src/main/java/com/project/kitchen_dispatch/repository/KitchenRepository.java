@@ -1,6 +1,6 @@
-package com.project.kitchendispatch.repository;
+package com.project.kitchen_dispatch.repository;
 
-import com.project.kitchendispatch.model.Kitchen;
+import com.project.kitchen_dispatch.model.Kitchen;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface KitchenRepository extends JpaRepository<Kitchen, Long> {
