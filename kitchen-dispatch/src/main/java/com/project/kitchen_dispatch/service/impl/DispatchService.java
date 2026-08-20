@@ -1,6 +1,7 @@
 package com.project.kitchen_dispatch.service.impl;
 
 import com.project.kitchen_dispatch.model.Dispatch;
+import com.project.kitchen_dispatch.model.Kitchen;
 import com.project.kitchen_dispatch.model.Order;
 import com.project.kitchen_dispatch.model.Rider;
 import com.project.kitchen_dispatch.repository.DispatchRepository;
@@ -144,6 +145,91 @@ public class DispatchService
                     "Rider is already assigned to another order"
             );
         }
+
+
+        /*
+         * ============================================================
+         * HISTORICAL DISTANCE SNAPSHOT
+         * ============================================================
+         *
+         * IMPORTANT:
+         *
+         * These distances are calculated NOW, at dispatch time.
+         *
+         * We do not calculate them later when the delivery is
+         * completed because the rider's current location may have
+         * changed.
+         *
+         * These values will later become ML training features.
+         */
+
+        Kitchen kitchen =
+                order.getKitchen();
+
+        if (kitchen == null) {
+
+            throw new IllegalStateException(
+                    "Kitchen is required for dispatch"
+            );
+        }
+
+
+        validateCoordinates(
+                rider.getLatitude(),
+                rider.getLongitude(),
+                "Rider"
+        );
+
+        validateCoordinates(
+                kitchen.getLatitude(),
+                kitchen.getLongitude(),
+                "Kitchen"
+        );
+
+        validateCoordinates(
+                order.getDeliveryLatitude(),
+                order.getDeliveryLongitude(),
+                "Customer"
+        );
+
+
+        double riderToKitchenDistance =
+                calculateDistanceKm(
+                        rider.getLatitude(),
+                        rider.getLongitude(),
+                        kitchen.getLatitude(),
+                        kitchen.getLongitude()
+                );
+
+
+        double kitchenToCustomerDistance =
+                calculateDistanceKm(
+                        kitchen.getLatitude(),
+                        kitchen.getLongitude(),
+                        order.getDeliveryLatitude(),
+                        order.getDeliveryLongitude()
+                );
+
+
+        double totalDistance =
+                riderToKitchenDistance
+                        + kitchenToCustomerDistance;
+
+
+        /*
+         * Save the historical feature snapshot.
+         */
+        dispatch.setRiderToKitchenDistanceKm(
+                roundDistance(riderToKitchenDistance)
+        );
+
+        dispatch.setKitchenToCustomerDistanceKm(
+                roundDistance(kitchenToCustomerDistance)
+        );
+
+        dispatch.setTotalDistanceKm(
+                roundDistance(totalDistance)
+        );
 
 
         LocalDateTime assignedAt =
@@ -586,6 +672,114 @@ public class DispatchService
         );
 
         return result;
+    }
+
+
+    /*
+     * ============================================================
+     * HAVERSINE DISTANCE
+     * ============================================================
+     *
+     * Calculates the great-circle distance between two
+     * latitude/longitude coordinates.
+     *
+     * Result is returned in kilometers.
+     */
+    private double calculateDistanceKm(
+            Double latitude1,
+            Double longitude1,
+            Double latitude2,
+            Double longitude2) {
+
+        double earthRadiusKm =
+                6371.0;
+
+        double lat1 =
+                Math.toRadians(latitude1);
+
+        double lat2 =
+                Math.toRadians(latitude2);
+
+        double deltaLatitude =
+                Math.toRadians(
+                        latitude2 - latitude1
+                );
+
+        double deltaLongitude =
+                Math.toRadians(
+                        longitude2 - longitude1
+                );
+
+
+        double a =
+                Math.sin(
+                        deltaLatitude / 2
+                )
+                        * Math.sin(
+                        deltaLatitude / 2
+                )
+                        +
+                        Math.cos(lat1)
+                                * Math.cos(lat2)
+                                * Math.sin(
+                                deltaLongitude / 2
+                        )
+                                * Math.sin(
+                                deltaLongitude / 2
+                        );
+
+
+        double c =
+                2 * Math.atan2(
+                        Math.sqrt(a),
+                        Math.sqrt(1 - a)
+                );
+
+
+        return earthRadiusKm * c;
+    }
+
+
+    private void validateCoordinates(
+            Double latitude,
+            Double longitude,
+            String locationName) {
+
+        if (latitude == null ||
+                longitude == null) {
+
+            throw new IllegalStateException(
+                    locationName
+                            + " coordinates are required for dispatch"
+            );
+        }
+
+        if (latitude < -90 ||
+                latitude > 90) {
+
+            throw new IllegalStateException(
+                    locationName
+                            + " latitude must be between -90 and 90"
+            );
+        }
+
+        if (longitude < -180 ||
+                longitude > 180) {
+
+            throw new IllegalStateException(
+                    locationName
+                            + " longitude must be between -180 and 180"
+            );
+        }
+    }
+
+
+    private double roundDistance(
+            double value) {
+
+        return Math.round(
+                value * 100.0
+        ) / 100.0;
     }
 
 
