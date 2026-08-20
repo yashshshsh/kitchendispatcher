@@ -64,4 +64,11 @@ public class Order {
             status = "PLACED";
         }
     }
+
+    @PrePersist
+    public void prePersist() {
+        if (createdAt == null) {
+            createdAt = LocalDateTime.now();
+        }
+    }
 }

@@ -4,6 +4,7 @@ import com.project.kitchen_dispatch.model.Dispatch;
 import com.project.kitchen_dispatch.model.Order;
 import com.project.kitchen_dispatch.model.Rider;
 import com.project.kitchen_dispatch.repository.DispatchRepository;
+import com.project.kitchen_dispatch.service.interfac.IDispatchDecisionService;
 import com.project.kitchen_dispatch.service.interfac.IDispatchService;
 import com.project.kitchen_dispatch.service.interfac.IRiderService;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +21,9 @@ public class DispatchService implements IDispatchService {
     private final DispatchRepository dispatchRepository;
 
     private final IRiderService riderService;
+
+    private final IDispatchDecisionService
+            dispatchDecisionService;
 
     @Override
     @Transactional
@@ -114,8 +118,8 @@ public class DispatchService implements IDispatchService {
         }
 
         /*
-         * Check whether rider is already assigned
-         * to another active delivery.
+         * Check whether rider is already handling
+         * another active order.
          */
         List<Dispatch> riderDispatches =
                 dispatchRepository
@@ -141,7 +145,9 @@ public class DispatchService implements IDispatchService {
         /*
          * Set dispatch state.
          */
-        dispatch.setStatus("ASSIGNED");
+        dispatch.setStatus(
+                "ASSIGNED"
+        );
 
         dispatch.setAssignedAt(
                 LocalDateTime.now()
@@ -150,14 +156,13 @@ public class DispatchService implements IDispatchService {
         /*
          * Update order state.
          */
-        order.setStatus("ASSIGNED");
+        order.setStatus(
+                "ASSIGNED"
+        );
 
         /*
-         * Rider becomes unavailable immediately
-         * after assignment.
+         * Make rider unavailable.
          */
-        rider.setAvailable(false);
-
         riderService
                 .markRiderUnavailable(
                         rider.getId()
@@ -167,6 +172,90 @@ public class DispatchService implements IDispatchService {
          * Save dispatch.
          */
         return dispatchRepository.save(
+                dispatch
+        );
+    }
+
+    @Override
+    @Transactional
+    public Dispatch automaticallyDispatchOrder(
+            Order order) {
+
+        if (order == null ||
+                order.getId() == null) {
+
+            throw new RuntimeException(
+                    "Order is required"
+            );
+        }
+
+        /*
+         * Only PLACED orders should enter
+         * automatic dispatch.
+         */
+        if (!"PLACED".equals(
+                order.getStatus())) {
+
+            return null;
+        }
+
+        /*
+         * Find the best currently available rider.
+         */
+        Rider rider;
+
+        try {
+
+            rider =
+                    riderService.findBestRider(
+                            order
+                    );
+
+        } catch (RuntimeException e) {
+
+            /*
+             * No rider currently available.
+             *
+             * Scheduler can try again later.
+             */
+            return null;
+        }
+
+        /*
+         * Calculate when this rider should
+         * actually be dispatched.
+         */
+        LocalDateTime optimalDispatchTime =
+                dispatchDecisionService
+                        .calculateOptimalDispatchTime(
+                                order,
+                                rider
+                        );
+
+        /*
+         * Food is not ready soon enough for
+         * immediate dispatch.
+         */
+        if (optimalDispatchTime.isAfter(
+                LocalDateTime.now())) {
+
+            return null;
+        }
+
+        /*
+         * Create the dispatch.
+         */
+        Dispatch dispatch =
+                Dispatch.builder()
+                        .order(order)
+                        .rider(rider)
+                        .status("ASSIGNED")
+                        .assignedAt(
+                                LocalDateTime.now()
+                        )
+                        .build();
+
+        return createDispatch(
                 dispatch
         );
     }
@@ -195,7 +284,7 @@ public class DispatchService implements IDispatchService {
         );
 
         /*
-         * Order follows the dispatch lifecycle.
+         * Update order status.
          */
         Order order =
                 dispatch.getOrder();
@@ -223,7 +312,7 @@ public class DispatchService implements IDispatchService {
                 );
 
         /*
-         * Delivery is only valid after pickup.
+         * Delivery is allowed only after pickup.
          */
         validateStatus(
                 dispatch,
@@ -239,7 +328,7 @@ public class DispatchService implements IDispatchService {
         );
 
         /*
-         * Update order.
+         * Update order status.
          */
         Order order =
                 dispatch.getOrder();
@@ -252,7 +341,7 @@ public class DispatchService implements IDispatchService {
         }
 
         /*
-         * Rider becomes available again.
+         * Make rider available again.
          */
         Rider rider =
                 dispatch.getRider();
@@ -275,6 +364,13 @@ public class DispatchService implements IDispatchService {
     public Dispatch getDispatchById(
             Long id) {
 
+        if (id == null) {
+
+            throw new RuntimeException(
+                    "Dispatch id is required"
+            );
+        }
+
         return dispatchRepository
                 .findById(id)
                 .orElseThrow(() ->
@@ -283,13 +379,6 @@ public class DispatchService implements IDispatchService {
                                         + id
                         )
                 );
-    }
-
-    @Override
-    public List<Dispatch> getAllDispatches() {
-
-        return dispatchRepository
-                .findAll();
     }
 
     private void validateStatus(
