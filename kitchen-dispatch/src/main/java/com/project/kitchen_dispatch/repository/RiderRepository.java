@@ -10,6 +10,10 @@ import java.util.List;
 
 public interface RiderRepository extends JpaRepository<Rider, Long> {
 
+    // Normal query - used by GET /api/riders/available
+    List<Rider> findByAvailableTrueAndActiveTrue();
+
+    // Locked query - used during actual dispatch selection
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             SELECT r

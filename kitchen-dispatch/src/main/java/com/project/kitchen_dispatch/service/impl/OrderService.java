@@ -4,6 +4,7 @@ import com.project.kitchen_dispatch.model.Order;
 import com.project.kitchen_dispatch.repository.OrderRepository;
 import com.project.kitchen_dispatch.service.interfac.IDispatchService;
 import com.project.kitchen_dispatch.service.interfac.IOrderService;
+import com.project.kitchen_dispatch.service.interfac.IPreparationTimeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +15,7 @@ public class OrderService implements IOrderService {
 
     private final OrderRepository orderRepository;
     private final IDispatchService dispatchService;
+    private final IPreparationTimeService  preparationTimeService;
 
     @Override
     @Transactional
@@ -28,6 +30,14 @@ public class OrderService implements IOrderService {
         }
 
         order.setStatus("PLACED");
+
+        Integer preparationTime =
+                preparationTimeService
+                        .estimatePreparationTime(order);
+
+        order.setEstimatedPreparationTime(
+                preparationTime
+        );
 
         Order savedOrder =
                 orderRepository.save(order);
