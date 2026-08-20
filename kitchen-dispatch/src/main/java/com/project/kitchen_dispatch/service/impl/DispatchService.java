@@ -11,8 +11,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -22,8 +25,14 @@ public class DispatchService implements IDispatchService {
 
     private final IRiderService riderService;
 
-    private final IDispatchDecisionService
-            dispatchDecisionService;
+    private final IDispatchDecisionService dispatchDecisionService;
+
+
+    /*
+     * ============================================================
+     * CREATE DISPATCH
+     * ============================================================
+     */
 
     @Override
     @Transactional
@@ -52,17 +61,16 @@ public class DispatchService implements IDispatchService {
             );
         }
 
-        Order order =
-                dispatch.getOrder();
+        Order order = dispatch.getOrder();
 
-        Rider rider =
-                dispatch.getRider();
+        Rider rider = dispatch.getRider();
+
 
         /*
          * Only PLACED orders can be dispatched.
          */
-        if (!"PLACED".equals(
-                order.getStatus())) {
+
+        if (!"PLACED".equals(order.getStatus())) {
 
             throw new RuntimeException(
                     "Order cannot be dispatched. Current status: "
@@ -70,9 +78,11 @@ public class DispatchService implements IDispatchService {
             );
         }
 
+
         /*
          * Rider must be active.
          */
+
         if (!Boolean.TRUE.equals(
                 rider.getActive())) {
 
@@ -81,9 +91,11 @@ public class DispatchService implements IDispatchService {
             );
         }
 
+
         /*
          * Rider must be available.
          */
+
         if (!Boolean.TRUE.equals(
                 rider.getAvailable())) {
 
@@ -92,15 +104,16 @@ public class DispatchService implements IDispatchService {
             );
         }
 
+
         /*
          * Check whether this order already has
          * an active dispatch.
          */
+
         List<Dispatch> existingDispatches =
-                dispatchRepository
-                        .findByOrderId(
-                                order.getId()
-                        );
+                dispatchRepository.findByOrderId(
+                        order.getId()
+                );
 
         boolean activeDispatchExists =
                 existingDispatches.stream()
@@ -117,15 +130,16 @@ public class DispatchService implements IDispatchService {
             );
         }
 
+
         /*
          * Check whether rider is already handling
          * another active order.
          */
+
         List<Dispatch> riderDispatches =
-                dispatchRepository
-                        .findByRiderId(
-                                rider.getId()
-                        );
+                dispatchRepository.findByRiderId(
+                        rider.getId()
+                );
 
         boolean riderBusy =
                 riderDispatches.stream()
@@ -142,39 +156,77 @@ public class DispatchService implements IDispatchService {
             );
         }
 
+
         /*
          * Set dispatch state.
          */
-        dispatch.setStatus(
-                "ASSIGNED"
-        );
+
+        dispatch.setStatus("ASSIGNED");
 
         dispatch.setAssignedAt(
                 LocalDateTime.now()
         );
 
+
+        /*
+         * ========================================================
+         * CALCULATE CUSTOMER ETA
+         * ========================================================
+         *
+         * ETA is calculated at assignment time.
+         *
+         * This prediction is stored and later compared
+         * with the actual delivery time.
+         */
+
+        Map<String, Object> eta =
+                dispatchDecisionService.calculateETA(
+                        order,
+                        rider
+                );
+
+        Object etaObject =
+                eta.get("estimatedDeliveryTime");
+
+        if (etaObject instanceof LocalDateTime) {
+
+            dispatch.setEstimatedDeliveryTime(
+                    (LocalDateTime) etaObject
+            );
+        }
+
+
         /*
          * Update order state.
          */
-        order.setStatus(
-                "ASSIGNED"
-        );
+
+        order.setStatus("ASSIGNED");
+
 
         /*
          * Make rider unavailable.
          */
-        riderService
-                .markRiderUnavailable(
-                        rider.getId()
-                );
+
+        riderService.markRiderUnavailable(
+                rider.getId()
+        );
+
 
         /*
          * Save dispatch.
          */
+
         return dispatchRepository.save(
                 dispatch
         );
     }
+
+
+    /*
+     * ============================================================
+     * AUTOMATIC DISPATCH
+     * ============================================================
+     */
 
     @Override
     @Transactional
@@ -189,19 +241,23 @@ public class DispatchService implements IDispatchService {
             );
         }
 
+
         /*
          * Only PLACED orders should enter
          * automatic dispatch.
          */
+
         if (!"PLACED".equals(
                 order.getStatus())) {
 
             return null;
         }
 
+
         /*
-         * Find the best currently available rider.
+         * Find best available rider.
          */
+
         Rider rider;
 
         try {
@@ -216,15 +272,17 @@ public class DispatchService implements IDispatchService {
             /*
              * No rider currently available.
              *
-             * Scheduler can try again later.
+             * Scheduler can retry later.
              */
+
             return null;
         }
 
+
         /*
-         * Calculate when this rider should
-         * actually be dispatched.
+         * Calculate optimal dispatch time.
          */
+
         LocalDateTime optimalDispatchTime =
                 dispatchDecisionService
                         .calculateOptimalDispatchTime(
@@ -232,19 +290,23 @@ public class DispatchService implements IDispatchService {
                                 rider
                         );
 
+
         /*
-         * Food is not ready soon enough for
-         * immediate dispatch.
+         * Rider should wait if food is
+         * not ready soon enough.
          */
+
         if (optimalDispatchTime.isAfter(
                 LocalDateTime.now())) {
 
             return null;
         }
 
+
         /*
-         * Create the dispatch.
+         * Create dispatch.
          */
+
         Dispatch dispatch =
                 Dispatch.builder()
                         .order(order)
@@ -260,6 +322,13 @@ public class DispatchService implements IDispatchService {
         );
     }
 
+
+    /*
+     * ============================================================
+     * PICKUP
+     * ============================================================
+     */
+
     @Override
     @Transactional
     public Dispatch markPickedUp(
@@ -270,10 +339,20 @@ public class DispatchService implements IDispatchService {
                         dispatchId
                 );
 
+
+        /*
+         * Pickup is allowed only from ASSIGNED.
+         */
+
         validateStatus(
                 dispatch,
                 "ASSIGNED"
         );
+
+
+        /*
+         * Update dispatch.
+         */
 
         dispatch.setStatus(
                 "PICKED_UP"
@@ -283,9 +362,11 @@ public class DispatchService implements IDispatchService {
                 LocalDateTime.now()
         );
 
+
         /*
-         * Update order status.
+         * Update order.
          */
+
         Order order =
                 dispatch.getOrder();
 
@@ -296,10 +377,18 @@ public class DispatchService implements IDispatchService {
             );
         }
 
+
         return dispatchRepository.save(
                 dispatch
         );
     }
+
+
+    /*
+     * ============================================================
+     * DELIVERY
+     * ============================================================
+     */
 
     @Override
     @Transactional
@@ -311,25 +400,70 @@ public class DispatchService implements IDispatchService {
                         dispatchId
                 );
 
+
         /*
          * Delivery is allowed only after pickup.
          */
+
         validateStatus(
                 dispatch,
                 "PICKED_UP"
         );
+
+
+        /*
+         * Actual delivery time.
+         */
+
+        LocalDateTime actualDeliveryTime =
+                LocalDateTime.now();
 
         dispatch.setStatus(
                 "DELIVERED"
         );
 
         dispatch.setDeliveredAt(
-                LocalDateTime.now()
+                actualDeliveryTime
         );
+
+
+        /*
+         * ========================================================
+         * CALCULATE ETA ERROR
+         * ========================================================
+         *
+         * Formula:
+         *
+         * actual delivery time
+         * -
+         * estimated delivery time
+         *
+         * Positive = late
+         * Negative = early
+         * Zero     = exact
+         */
+
+        LocalDateTime estimatedDeliveryTime =
+                dispatch.getEstimatedDeliveryTime();
+
+        if (estimatedDeliveryTime != null) {
+
+            long etaErrorMinutes =
+                    Duration.between(
+                            estimatedDeliveryTime,
+                            actualDeliveryTime
+                    ).toMinutes();
+
+            dispatch.setEtaErrorMinutes(
+                    etaErrorMinutes
+            );
+        }
+
 
         /*
          * Update order status.
          */
+
         Order order =
                 dispatch.getOrder();
 
@@ -340,25 +474,38 @@ public class DispatchService implements IDispatchService {
             );
         }
 
+
         /*
-         * Make rider available again.
+         * Rider becomes available again.
          */
+
         Rider rider =
                 dispatch.getRider();
 
         if (rider != null &&
                 rider.getId() != null) {
 
-            riderService
-                    .markRiderAvailable(
-                            rider.getId()
-                    );
+            riderService.markRiderAvailable(
+                    rider.getId()
+            );
         }
+
+
+        /*
+         * Save final dispatch.
+         */
 
         return dispatchRepository.save(
                 dispatch
         );
     }
+
+
+    /*
+     * ============================================================
+     * GET DISPATCH
+     * ============================================================
+     */
 
     @Override
     public Dispatch getDispatchById(
@@ -381,12 +528,304 @@ public class DispatchService implements IDispatchService {
                 );
     }
 
+
+    /*
+     * ============================================================
+     * ETA ANALYTICS
+     * ============================================================
+     *
+     * Calculates ETA accuracy using completed deliveries.
+     */
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<String, Object> getETAAnalytics() {
+
+        List<Dispatch> dispatches =
+                dispatchRepository.findAll();
+
+
+        /*
+         * Only delivered dispatches with an ETA
+         * error can be used for analytics.
+         */
+
+        List<Dispatch> completedDispatches =
+                dispatches.stream()
+                        .filter(dispatch ->
+                                "DELIVERED".equals(
+                                        dispatch.getStatus()
+                                )
+                        )
+                        .filter(dispatch ->
+                                dispatch.getEtaErrorMinutes()
+                                        != null
+                        )
+                        .toList();
+
+        int totalDeliveries =
+                completedDispatches.size();
+
+
+        /*
+         * No historical data yet.
+         */
+
+        if (totalDeliveries == 0) {
+
+            Map<String, Object> result =
+                    new LinkedHashMap<>();
+
+            result.put(
+                    "totalDeliveries",
+                    0
+            );
+
+            result.put(
+                    "averageEtaErrorMinutes",
+                    0
+            );
+
+            result.put(
+                    "averageAbsoluteEtaErrorMinutes",
+                    0
+            );
+
+            result.put(
+                    "onTimeDeliveries",
+                    0
+            );
+
+            result.put(
+                    "earlyDeliveries",
+                    0
+            );
+
+            result.put(
+                    "lateDeliveries",
+                    0
+            );
+
+            result.put(
+                    "onTimePercentage",
+                    0
+            );
+
+            result.put(
+                    "message",
+                    "No completed delivery data available yet"
+            );
+
+            return result;
+        }
+
+
+        /*
+         * ========================================================
+         * LATE DELIVERIES
+         * ========================================================
+         */
+
+        long lateDeliveries =
+                completedDispatches.stream()
+                        .filter(dispatch ->
+                                dispatch
+                                        .getEtaErrorMinutes()
+                                        > 0
+                        )
+                        .count();
+
+
+        /*
+         * ========================================================
+         * EARLY DELIVERIES
+         * ========================================================
+         */
+
+        long earlyDeliveries =
+                completedDispatches.stream()
+                        .filter(dispatch ->
+                                dispatch
+                                        .getEtaErrorMinutes()
+                                        < 0
+                        )
+                        .count();
+
+
+        /*
+         * ========================================================
+         * ON-TIME DELIVERIES
+         * ========================================================
+         *
+         * Within ±1 minute is considered on time.
+         */
+
+        long onTimeDeliveries =
+                completedDispatches.stream()
+                        .filter(dispatch ->
+                                Math.abs(
+                                        dispatch
+                                                .getEtaErrorMinutes()
+                                ) <= 1
+                        )
+                        .count();
+
+
+        /*
+         * ========================================================
+         * AVERAGE SIGNED ERROR
+         * ========================================================
+         *
+         * Positive:
+         * ETA tends to underestimate delivery time.
+         *
+         * Negative:
+         * ETA tends to overestimate delivery time.
+         */
+
+        double averageEtaError =
+                completedDispatches.stream()
+                        .mapToLong(
+                                Dispatch::getEtaErrorMinutes
+                        )
+                        .average()
+                        .orElse(0);
+
+
+        /*
+         * ========================================================
+         * AVERAGE ABSOLUTE ERROR
+         * ========================================================
+         *
+         * This is the most useful basic accuracy metric.
+         */
+
+        double averageAbsoluteEtaError =
+                completedDispatches.stream()
+                        .mapToLong(
+                                dispatch ->
+                                        Math.abs(
+                                                dispatch
+                                                        .getEtaErrorMinutes()
+                                        )
+                        )
+                        .average()
+                        .orElse(0);
+
+
+        /*
+         * ========================================================
+         * ON-TIME PERCENTAGE
+         * ========================================================
+         */
+
+        double onTimePercentage =
+                (
+                        (double) onTimeDeliveries
+                                /
+                                totalDeliveries
+                )
+                        * 100.0;
+
+
+        /*
+         * ========================================================
+         * BUILD RESPONSE
+         * ========================================================
+         */
+
+        Map<String, Object> result =
+                new LinkedHashMap<>();
+
+        result.put(
+                "totalDeliveries",
+                totalDeliveries
+        );
+
+        result.put(
+                "averageEtaErrorMinutes",
+                round(
+                        averageEtaError
+                )
+        );
+
+        result.put(
+                "averageAbsoluteEtaErrorMinutes",
+                round(
+                        averageAbsoluteEtaError
+                )
+        );
+
+        result.put(
+                "onTimeDeliveries",
+                onTimeDeliveries
+        );
+
+        result.put(
+                "earlyDeliveries",
+                earlyDeliveries
+        );
+
+        result.put(
+                "lateDeliveries",
+                lateDeliveries
+        );
+
+        result.put(
+                "onTimePercentage",
+                round(
+                        onTimePercentage
+                )
+        );
+
+        result.put(
+                "interpretation",
+                getEtaInterpretation(
+                        averageEtaError
+                )
+        );
+
+        return result;
+    }
+
+
+    /*
+     * ============================================================
+     * ETA INTERPRETATION
+     * ============================================================
+     */
+
+    private String getEtaInterpretation(
+            double averageEtaError) {
+
+        if (averageEtaError > 2) {
+
+            return "ETA tends to underestimate delivery time";
+
+        } else if (averageEtaError < -2) {
+
+            return "ETA tends to overestimate delivery time";
+
+        } else {
+
+            return "ETA is reasonably well calibrated";
+        }
+    }
+
+
+    /*
+     * ============================================================
+     * VALIDATE STATUS
+     * ============================================================
+     */
+
     private void validateStatus(
             Dispatch dispatch,
             String expectedStatus) {
 
         if (!expectedStatus.equals(
-                dispatch.getStatus())) {
+                dispatch.getStatus()
+        )) {
 
             throw new RuntimeException(
                     "Invalid dispatch state. Expected "
@@ -395,5 +834,20 @@ public class DispatchService implements IDispatchService {
                             + dispatch.getStatus()
             );
         }
+    }
+
+
+    /*
+     * ============================================================
+     * ROUND
+     * ============================================================
+     */
+
+    private double round(
+            double value) {
+
+        return Math.round(
+                value * 100.0
+        ) / 100.0;
     }
 }

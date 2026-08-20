@@ -19,11 +19,18 @@ public class Dispatch {
     private Long id;
 
     @OneToOne
-    @JoinColumn(name = "order_id", nullable = false, unique = true)
+    @JoinColumn(
+            name = "order_id",
+            nullable = false,
+            unique = true
+    )
     private Order order;
 
     @ManyToOne
-    @JoinColumn(name = "rider_id", nullable = false)
+    @JoinColumn(
+            name = "rider_id",
+            nullable = false
+    )
     private Rider rider;
 
     @Column(nullable = false)
@@ -35,4 +42,29 @@ public class Dispatch {
     private LocalDateTime pickedUpAt;
 
     private LocalDateTime deliveredAt;
+
+    /*
+     * ETA calculated for this dispatch.
+     *
+     * This stores the prediction that was shown
+     * to the customer.
+     */
+    private LocalDateTime estimatedDeliveryTime;
+
+    /*
+     * Difference between actual delivery time
+     * and predicted delivery time.
+     *
+     * Example:
+     *
+     * ETA      = 11:38
+     * Delivered = 11:42
+     *
+     * etaErrorMinutes = +4
+     *
+     * Positive  -> delivered late
+     * Negative  -> delivered early
+     * Zero      -> exact prediction
+     */
+    private Long etaErrorMinutes;
 }

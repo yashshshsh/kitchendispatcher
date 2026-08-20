@@ -44,17 +44,17 @@ public class Order {
 
     /*
      * Exact time at which the order was created.
-     *
-     * Used by the dispatch engine to calculate:
-     *
-     * Order Created Time
-     *        +
-     * Preparation Time
-     *        =
-     * Food Ready Time
      */
     @Column(nullable = false)
     private LocalDateTime createdAt;
+
+    /*
+     * Latest calculated estimated delivery time.
+     *
+     * This represents the expected time at which
+     * the customer should receive the order.
+     */
+    private LocalDateTime estimatedDeliveryTime;
 
     /*
      * Automatically executed by JPA before

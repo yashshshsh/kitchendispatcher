@@ -28,6 +28,13 @@ public class DispatchController {
 
     private final IRiderService riderService;
 
+
+    /*
+     * ============================================================
+     * CREATE DISPATCH
+     * ============================================================
+     */
+
     @PostMapping
     public ResponseEntity<Dispatch> createDispatch(
             @RequestBody Dispatch dispatch) {
@@ -43,18 +50,34 @@ public class DispatchController {
         );
     }
 
+
+    /*
+     * ============================================================
+     * PICKUP
+     * ============================================================
+     */
+
     @PostMapping("/{id}/pickup")
     public ResponseEntity<Dispatch>
     markPickedUp(
             @PathVariable Long id) {
 
         Dispatch dispatch =
-                dispatchService.markPickedUp(id);
+                dispatchService.markPickedUp(
+                        id
+                );
 
         return ResponseEntity.ok(
                 dispatch
         );
     }
+
+
+    /*
+     * ============================================================
+     * DELIVERY
+     * ============================================================
+     */
 
     @PostMapping("/{id}/deliver")
     public ResponseEntity<Dispatch>
@@ -62,12 +85,21 @@ public class DispatchController {
             @PathVariable Long id) {
 
         Dispatch dispatch =
-                dispatchService.markDelivered(id);
+                dispatchService.markDelivered(
+                        id
+                );
 
         return ResponseEntity.ok(
                 dispatch
         );
     }
+
+
+    /*
+     * ============================================================
+     * EVALUATE RIDERS
+     * ============================================================
+     */
 
     @GetMapping("/evaluate/{orderId}")
     public ResponseEntity<Map<String, Object>>
@@ -84,18 +116,93 @@ public class DispatchController {
                         order
                 );
 
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(
+                result
+        );
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<Dispatch> getDispatchById(
-            @PathVariable Long id) {
 
-        Dispatch dispatch =
-                dispatchService.getDispatchById(id);
+    /*
+     * ============================================================
+     * ETA ANALYTICS
+     * ============================================================
+     *
+     * IMPORTANT:
+     *
+     * This endpoint must appear before:
+     *
+     * GET /{id}
+     *
+     * because otherwise "analytics" could be interpreted
+     * as the dispatch ID.
+     */
 
-        return ResponseEntity.ok(dispatch);
+    @GetMapping("/analytics/eta")
+    public ResponseEntity<Map<String, Object>>
+    getETAAnalytics() {
+
+        Map<String, Object> analytics =
+                dispatchService.getETAAnalytics();
+
+        return ResponseEntity.ok(
+                analytics
+        );
     }
+
+
+    /*
+     * ============================================================
+     * CUSTOMER ETA
+     * ============================================================
+     */
+
+    @GetMapping("/eta/{orderId}")
+    public ResponseEntity<Map<String, Object>>
+    calculateETA(
+            @PathVariable Long orderId) {
+
+        /*
+         * Find order.
+         */
+
+        Order order =
+                orderService.getOrderById(
+                        orderId
+                );
+
+
+        /*
+         * Find rider assigned to order.
+         */
+
+        Rider rider =
+                riderService.findAssignedRiderForOrder(
+                        orderId
+                );
+
+
+        /*
+         * Calculate ETA.
+         */
+
+        Map<String, Object> eta =
+                dispatchDecisionService
+                        .calculateETA(
+                                order,
+                                rider
+                        );
+
+        return ResponseEntity.ok(
+                eta
+        );
+    }
+
+
+    /*
+     * ============================================================
+     * DISPATCH DECISION
+     * ============================================================
+     */
 
     @GetMapping("/decision/{orderId}/{riderId}")
     public ResponseEntity<Map<String, Object>>
@@ -122,6 +229,28 @@ public class DispatchController {
 
         return ResponseEntity.ok(
                 decision
+        );
+    }
+
+
+    /*
+     * ============================================================
+     * GET DISPATCH
+     * ============================================================
+     */
+
+    @GetMapping("/{id}")
+    public ResponseEntity<Dispatch>
+    getDispatchById(
+            @PathVariable Long id) {
+
+        Dispatch dispatch =
+                dispatchService.getDispatchById(
+                        id
+                );
+
+        return ResponseEntity.ok(
+                dispatch
         );
     }
 }

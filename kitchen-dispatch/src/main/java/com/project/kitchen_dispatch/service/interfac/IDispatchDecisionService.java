@@ -31,4 +31,12 @@ public interface IDispatchDecisionService {
             Order order,
             Rider rider
     );
+
+    /*
+     * Calculate the complete customer ETA.
+     */
+    Map<String, Object> calculateETA(
+            Order order,
+            Rider rider
+    );
 }
