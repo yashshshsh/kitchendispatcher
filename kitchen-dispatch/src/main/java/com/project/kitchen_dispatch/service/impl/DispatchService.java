@@ -24,13 +24,23 @@ public class DispatchService implements IDispatchService {
     @Transactional
     public Dispatch createDispatch(Dispatch dispatch) {
 
-        if (dispatch.getOrder() == null) {
+        if (dispatch == null) {
+            throw new RuntimeException(
+                    "Dispatch is required"
+            );
+        }
+
+        if (dispatch.getOrder() == null ||
+                dispatch.getOrder().getId() == null) {
+
             throw new RuntimeException(
                     "Order is required for dispatch"
             );
         }
 
-        if (dispatch.getRider() == null) {
+        if (dispatch.getRider() == null ||
+                dispatch.getRider().getId() == null) {
+
             throw new RuntimeException(
                     "Rider is required for dispatch"
             );
@@ -45,17 +55,22 @@ public class DispatchService implements IDispatchService {
             );
         }
 
-        Rider rider = riderService.getRiderById(
-                dispatch.getRider().getId()
-        );
+        Rider rider =
+                riderService.getRiderById(
+                        dispatch.getRider().getId()
+                );
 
-        if (!Boolean.TRUE.equals(rider.getAvailable())) {
+        if (!Boolean.TRUE.equals(
+                rider.getAvailable())) {
+
             throw new RuntimeException(
                     "Rider is currently unavailable"
             );
         }
 
-        if (!Boolean.TRUE.equals(rider.getActive())) {
+        if (!Boolean.TRUE.equals(
+                rider.getActive())) {
+
             throw new RuntimeException(
                     "Rider is inactive"
             );
@@ -63,13 +78,11 @@ public class DispatchService implements IDispatchService {
 
         dispatch.setRider(rider);
 
-        if (dispatch.getAssignedAt() == null) {
-            dispatch.setAssignedAt(
-                    LocalDateTime.now()
-            );
-        }
-
         dispatch.setStatus("ASSIGNED");
+
+        dispatch.setAssignedAt(
+                LocalDateTime.now()
+        );
 
         Dispatch savedDispatch =
                 dispatchRepository.save(dispatch);
@@ -87,7 +100,8 @@ public class DispatchService implements IDispatchService {
         return dispatchRepository.findById(id)
                 .orElseThrow(() ->
                         new RuntimeException(
-                                "Dispatch not found with id: " + id
+                                "Dispatch not found with id: "
+                                        + id
                         ));
     }
 
@@ -96,15 +110,19 @@ public class DispatchService implements IDispatchService {
     public Dispatch automaticallyDispatchOrder(
             Order order) {
 
-        if (order == null) {
+        if (order == null ||
+                order.getId() == null) {
+
             throw new RuntimeException(
-                    "Order is required for dispatch"
+                    "Valid order is required for dispatch"
             );
         }
 
-        Kitchen kitchen = order.getKitchen();
+        Kitchen kitchen =
+                order.getKitchen();
 
         if (kitchen == null) {
+
             throw new RuntimeException(
                     "Order does not have a kitchen"
             );
@@ -118,6 +136,9 @@ public class DispatchService implements IDispatchService {
             );
         }
 
+        /*
+         * Prevent duplicate dispatch.
+         */
         if (dispatchRepository
                 .findByOrder(order)
                 .isPresent()) {
@@ -127,22 +148,41 @@ public class DispatchService implements IDispatchService {
             );
         }
 
+        /*
+         * Find nearest available rider.
+         */
         Rider rider =
                 riderService.findNearestRider(
                         kitchen.getLatitude(),
                         kitchen.getLongitude()
                 );
 
-        Dispatch dispatch = Dispatch.builder()
-                .order(order)
-                .rider(rider)
-                .status("ASSIGNED")
-                .assignedAt(LocalDateTime.now())
-                .build();
+        if (rider == null) {
+
+            throw new RuntimeException(
+                    "No suitable rider found"
+            );
+        }
+
+        /*
+         * Create dispatch.
+         */
+        Dispatch dispatch =
+                Dispatch.builder()
+                        .order(order)
+                        .rider(rider)
+                        .status("ASSIGNED")
+                        .assignedAt(
+                                LocalDateTime.now()
+                        )
+                        .build();
 
         Dispatch savedDispatch =
                 dispatchRepository.save(dispatch);
 
+        /*
+         * Rider is now busy.
+         */
         riderService.markRiderUnavailable(
                 rider.getId()
         );

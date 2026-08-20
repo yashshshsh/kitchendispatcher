@@ -8,32 +8,34 @@ import org.springframework.stereotype.Service;
 public class PreparationTimeService
         implements IPreparationTimeService {
 
+    private static final int DEFAULT_PREPARATION_TIME = 20;
+
     @Override
-    public Integer estimatePreparationTime(Order order) {
+    public Integer estimatePreparationTime(
+            Order order) {
 
         if (order == null) {
+
             throw new RuntimeException(
                     "Order is required"
             );
         }
 
-        /*
-         * Temporary rule-based estimation.
-         *
-         * Later this will be replaced with
-         * an ML prediction model.
-         */
-
-        Integer preparationTime =
+        Integer requestedTime =
                 order.getEstimatedPreparationTime();
 
-        if (preparationTime != null &&
-                preparationTime > 0) {
+        if (requestedTime == null) {
 
-            return preparationTime;
+            return DEFAULT_PREPARATION_TIME;
         }
 
-        // Default preparation time
-        return 20;
+        if (requestedTime <= 0) {
+
+            throw new RuntimeException(
+                    "Preparation time must be greater than zero"
+            );
+        }
+
+        return requestedTime;
     }
 }
