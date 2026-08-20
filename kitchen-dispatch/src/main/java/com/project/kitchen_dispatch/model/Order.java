@@ -45,13 +45,20 @@ public class Order {
     /*
      * Exact time at which the order was created.
      *
-     * This is important for dispatch calculations.
+     * Used by the dispatch engine to calculate:
+     *
+     * Order Created Time
+     *        +
+     * Preparation Time
+     *        =
+     * Food Ready Time
      */
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
     /*
-     * Automatically set when a new order is created.
+     * Automatically executed by JPA before
+     * inserting a new Order.
      */
     @PrePersist
     protected void onCreate() {
@@ -62,13 +69,6 @@ public class Order {
 
         if (status == null) {
             status = "PLACED";
-        }
-    }
-
-    @PrePersist
-    public void prePersist() {
-        if (createdAt == null) {
-            createdAt = LocalDateTime.now();
         }
     }
 }
