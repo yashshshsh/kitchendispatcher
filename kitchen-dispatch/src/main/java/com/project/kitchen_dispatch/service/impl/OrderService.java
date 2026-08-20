@@ -19,6 +19,14 @@ public class OrderService implements IOrderService {
     @Transactional
     public Order createOrder(Order order) {
 
+        if (order.getKitchen() == null ||
+                order.getKitchen().getId() == null) {
+
+            throw new RuntimeException(
+                    "Kitchen is required for an order"
+            );
+        }
+
         order.setStatus("PLACED");
 
         Order savedOrder =

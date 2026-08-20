@@ -5,6 +5,7 @@ import com.project.kitchen_dispatch.repository.RiderRepository;
 import com.project.kitchen_dispatch.service.interfac.IRiderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Comparator;
 import java.util.List;
@@ -17,11 +18,21 @@ public class RiderService implements IRiderService {
 
     @Override
     public Rider createRider(Rider rider) {
+
+        if (rider.getAvailable() == null) {
+            rider.setAvailable(true);
+        }
+
+        if (rider.getActive() == null) {
+            rider.setActive(true);
+        }
+
         return riderRepository.save(rider);
     }
 
     @Override
     public Rider getRiderById(Long id) {
+
         return riderRepository.findById(id)
                 .orElseThrow(() ->
                         new RuntimeException(
@@ -31,16 +42,26 @@ public class RiderService implements IRiderService {
 
     @Override
     public List<Rider> getAvailableRiders() {
+
         return riderRepository.findByAvailableTrueAndActiveTrue();
     }
 
     @Override
+    @Transactional
     public Rider findNearestRider(
             Double kitchenLatitude,
             Double kitchenLongitude) {
 
+        if (kitchenLatitude == null ||
+                kitchenLongitude == null) {
+
+            throw new RuntimeException(
+                    "Kitchen location is not available"
+            );
+        }
+
         List<Rider> availableRiders =
-                riderRepository.findByAvailableTrueAndActiveTrue();
+                riderRepository.findAvailableRidersForDispatch();
 
         if (availableRiders.isEmpty()) {
             throw new RuntimeException(
@@ -53,14 +74,16 @@ public class RiderService implements IRiderService {
                         rider.getLatitude() != null &&
                                 rider.getLongitude() != null
                 )
-                .min(Comparator.comparingDouble(rider ->
-                        calculateDistance(
-                                kitchenLatitude,
-                                kitchenLongitude,
-                                rider.getLatitude(),
-                                rider.getLongitude()
+                .min(
+                        Comparator.comparingDouble(rider ->
+                                calculateDistance(
+                                        kitchenLatitude,
+                                        kitchenLongitude,
+                                        rider.getLatitude(),
+                                        rider.getLongitude()
+                                )
                         )
-                ))
+                )
                 .orElseThrow(() ->
                         new RuntimeException(
                                 "No available riders with valid location"
@@ -68,6 +91,7 @@ public class RiderService implements IRiderService {
     }
 
     @Override
+    @Transactional
     public Rider markRiderUnavailable(Long id) {
 
         Rider rider = riderRepository.findById(id)
@@ -75,6 +99,12 @@ public class RiderService implements IRiderService {
                         new RuntimeException(
                                 "Rider not found with id: " + id
                         ));
+
+        if (!Boolean.TRUE.equals(rider.getAvailable())) {
+            throw new RuntimeException(
+                    "Rider is already unavailable"
+            );
+        }
 
         rider.setAvailable(false);
 

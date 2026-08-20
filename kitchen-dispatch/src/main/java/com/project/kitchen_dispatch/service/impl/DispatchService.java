@@ -21,17 +21,64 @@ public class DispatchService implements IDispatchService {
     private final IRiderService riderService;
 
     @Override
+    @Transactional
     public Dispatch createDispatch(Dispatch dispatch) {
 
+        if (dispatch.getOrder() == null) {
+            throw new RuntimeException(
+                    "Order is required for dispatch"
+            );
+        }
+
+        if (dispatch.getRider() == null) {
+            throw new RuntimeException(
+                    "Rider is required for dispatch"
+            );
+        }
+
+        if (dispatchRepository
+                .findByOrder(dispatch.getOrder())
+                .isPresent()) {
+
+            throw new RuntimeException(
+                    "Order already has a dispatch"
+            );
+        }
+
+        Rider rider = riderService.getRiderById(
+                dispatch.getRider().getId()
+        );
+
+        if (!Boolean.TRUE.equals(rider.getAvailable())) {
+            throw new RuntimeException(
+                    "Rider is currently unavailable"
+            );
+        }
+
+        if (!Boolean.TRUE.equals(rider.getActive())) {
+            throw new RuntimeException(
+                    "Rider is inactive"
+            );
+        }
+
+        dispatch.setRider(rider);
+
         if (dispatch.getAssignedAt() == null) {
-            dispatch.setAssignedAt(LocalDateTime.now());
+            dispatch.setAssignedAt(
+                    LocalDateTime.now()
+            );
         }
 
-        if (dispatch.getStatus() == null) {
-            dispatch.setStatus("ASSIGNED");
-        }
+        dispatch.setStatus("ASSIGNED");
 
-        return dispatchRepository.save(dispatch);
+        Dispatch savedDispatch =
+                dispatchRepository.save(dispatch);
+
+        riderService.markRiderUnavailable(
+                rider.getId()
+        );
+
+        return savedDispatch;
     }
 
     @Override
@@ -46,7 +93,14 @@ public class DispatchService implements IDispatchService {
 
     @Override
     @Transactional
-    public Dispatch automaticallyDispatchOrder(Order order) {
+    public Dispatch automaticallyDispatchOrder(
+            Order order) {
+
+        if (order == null) {
+            throw new RuntimeException(
+                    "Order is required for dispatch"
+            );
+        }
 
         Kitchen kitchen = order.getKitchen();
 
@@ -64,10 +118,20 @@ public class DispatchService implements IDispatchService {
             );
         }
 
-        Rider rider = riderService.findNearestRider(
-                kitchen.getLatitude(),
-                kitchen.getLongitude()
-        );
+        if (dispatchRepository
+                .findByOrder(order)
+                .isPresent()) {
+
+            throw new RuntimeException(
+                    "Order already has a dispatch"
+            );
+        }
+
+        Rider rider =
+                riderService.findNearestRider(
+                        kitchen.getLatitude(),
+                        kitchen.getLongitude()
+                );
 
         Dispatch dispatch = Dispatch.builder()
                 .order(order)
