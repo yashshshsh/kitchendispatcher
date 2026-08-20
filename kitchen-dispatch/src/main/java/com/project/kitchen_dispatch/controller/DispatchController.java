@@ -118,13 +118,7 @@ public class DispatchController {
                 );
 
         /*
-         * IMPORTANT:
-         *
-         * calculateETA updates estimatedDeliveryTime
-         * on the Order object.
-         *
-         * Explicitly persist it here because this
-         * GET request isn't itself a transaction.
+         * Persist the newly calculated ETA.
          */
         orderService.saveOrder(order);
 

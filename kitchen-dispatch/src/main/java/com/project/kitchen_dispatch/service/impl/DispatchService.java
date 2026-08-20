@@ -4,6 +4,7 @@ import com.project.kitchen_dispatch.model.Dispatch;
 import com.project.kitchen_dispatch.model.Order;
 import com.project.kitchen_dispatch.model.Rider;
 import com.project.kitchen_dispatch.repository.DispatchRepository;
+import com.project.kitchen_dispatch.repository.RiderRepository;
 import com.project.kitchen_dispatch.service.interfac.IDispatchDecisionService;
 import com.project.kitchen_dispatch.service.interfac.IDispatchService;
 import com.project.kitchen_dispatch.service.interfac.IRiderService;
@@ -24,6 +25,8 @@ public class DispatchService
 
     private final DispatchRepository dispatchRepository;
 
+    private final RiderRepository riderRepository;
+
     private final IRiderService riderService;
 
     private final IDispatchDecisionService
@@ -36,7 +39,7 @@ public class DispatchService
             Dispatch dispatch) {
 
         if (dispatch == null) {
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Dispatch is required"
             );
         }
@@ -44,7 +47,7 @@ public class DispatchService
         if (dispatch.getOrder() == null ||
                 dispatch.getOrder().getId() == null) {
 
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Order is required"
             );
         }
@@ -52,7 +55,7 @@ public class DispatchService
         if (dispatch.getRider() == null ||
                 dispatch.getRider().getId() == null) {
 
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Rider is required"
             );
         }
@@ -60,24 +63,41 @@ public class DispatchService
         Order order =
                 dispatch.getOrder();
 
-        Rider rider =
-                dispatch.getRider();
+        Long riderId =
+                dispatch.getRider().getId();
 
 
         if (!"PLACED".equals(
                 order.getStatus())) {
 
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "Order cannot be dispatched. Current status: "
                             + order.getStatus()
             );
         }
 
 
+        /*
+         * Lock the rider before checking availability.
+         *
+         * This prevents two concurrent dispatch requests
+         * from assigning the same rider.
+         */
+        Rider rider =
+                riderRepository
+                        .findByIdForUpdate(riderId)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Rider not found with id: "
+                                                + riderId
+                                )
+                        );
+
+
         if (!Boolean.TRUE.equals(
                 rider.getActive())) {
 
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "Rider is inactive"
             );
         }
@@ -86,16 +106,12 @@ public class DispatchService
         if (!Boolean.TRUE.equals(
                 rider.getAvailable())) {
 
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "Rider is unavailable"
             );
         }
 
 
-        /*
-         * Because Dispatch.order is OneToOne,
-         * only one dispatch can exist for an order.
-         */
         List<Dispatch> existing =
                 dispatchRepository
                         .findByOrderId(
@@ -104,16 +120,12 @@ public class DispatchService
 
         if (!existing.isEmpty()) {
 
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "Order already has a dispatch"
             );
         }
 
 
-        /*
-         * Ensure rider isn't already handling
-         * another active order.
-         */
         boolean riderBusy =
                 dispatchRepository
                         .findByRiderId(
@@ -128,7 +140,7 @@ public class DispatchService
 
         if (riderBusy) {
 
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "Rider is already assigned to another order"
             );
         }
@@ -147,7 +159,7 @@ public class DispatchService
 
 
         /*
-         * Calculate and persist ETA.
+         * Calculate ETA before persisting dispatch.
          */
         Map<String, Object> eta =
                 dispatchDecisionService
@@ -163,7 +175,7 @@ public class DispatchService
 
         if (!(etaValue instanceof LocalDateTime)) {
 
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "Unable to calculate estimated delivery time"
             );
         }
@@ -185,12 +197,11 @@ public class DispatchService
 
 
         /*
-         * Make rider unavailable before saving
-         * the dispatch.
+         * Rider is already locked in this transaction.
+         * Update it directly instead of performing
+         * another database lookup.
          */
-        riderService.markRiderUnavailable(
-                rider.getId()
-        );
+        rider.setAvailable(false);
 
 
         return dispatchRepository.save(
@@ -207,7 +218,7 @@ public class DispatchService
         if (order == null ||
                 order.getId() == null) {
 
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Order is required"
             );
         }
@@ -228,8 +239,12 @@ public class DispatchService
                             order
                     );
 
-        } catch (RuntimeException e) {
+        } catch (IllegalArgumentException e) {
 
+            /*
+             * No rider is currently available.
+             * Scheduler can retry later.
+             */
             return null;
         }
 
@@ -382,7 +397,7 @@ public class DispatchService
 
         if (id == null) {
 
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Dispatch id is required"
             );
         }
@@ -390,7 +405,7 @@ public class DispatchService
         return dispatchRepository
                 .findById(id)
                 .orElseThrow(() ->
-                        new RuntimeException(
+                        new IllegalArgumentException(
                                 "Dispatch not found with id: "
                                         + id
                         )
@@ -472,16 +487,6 @@ public class DispatchService
             return result;
         }
 
-
-        /*
-         * IMPORTANT:
-         *
-         * These three conditions are mutually exclusive.
-         *
-         * <= -2   EARLY
-         * -1..+1  ON TIME
-         * >= +2   LATE
-         */
 
         long early =
                 completed.stream()
@@ -610,7 +615,7 @@ public class DispatchService
                 dispatch.getStatus()
         )) {
 
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "Invalid dispatch state. Expected "
                             + expectedStatus
                             + " but found "

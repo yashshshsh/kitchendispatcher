@@ -32,10 +32,11 @@ public class RiderService implements IRiderService {
 
 
     @Override
+    @Transactional
     public Rider createRider(Rider rider) {
 
         if (rider == null) {
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Rider is required"
             );
         }
@@ -43,7 +44,7 @@ public class RiderService implements IRiderService {
         if (rider.getName() == null ||
                 rider.getName().isBlank()) {
 
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Rider name is required"
             );
         }
@@ -51,7 +52,7 @@ public class RiderService implements IRiderService {
         if (rider.getPhone() == null ||
                 rider.getPhone().isBlank()) {
 
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Rider phone is required"
             );
         }
@@ -75,10 +76,11 @@ public class RiderService implements IRiderService {
 
 
     @Override
+    @Transactional(readOnly = true)
     public Rider getRiderById(Long id) {
 
         if (id == null) {
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Rider id is required"
             );
         }
@@ -86,7 +88,7 @@ public class RiderService implements IRiderService {
         return riderRepository
                 .findById(id)
                 .orElseThrow(() ->
-                        new RuntimeException(
+                        new IllegalArgumentException(
                                 "Rider not found with id: " + id
                         )
                 );
@@ -94,6 +96,7 @@ public class RiderService implements IRiderService {
 
 
     @Override
+    @Transactional(readOnly = true)
     public List<Rider> getAvailableRiders() {
 
         return riderRepository
@@ -108,6 +111,7 @@ public class RiderService implements IRiderService {
 
 
     @Override
+    @Transactional(readOnly = true)
     public Rider findNearestRider(
             Double kitchenLatitude,
             Double kitchenLongitude) {
@@ -122,7 +126,7 @@ public class RiderService implements IRiderService {
                 getAvailableRiders();
 
         if (riders.isEmpty()) {
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "No available riders found"
             );
         }
@@ -140,38 +144,35 @@ public class RiderService implements IRiderService {
                         )
                 )
                 .orElseThrow(() ->
-                        new RuntimeException(
+                        new IllegalArgumentException(
                                 "Unable to find nearest rider"
                         )
                 );
     }
 
 
+    /*
+     * Actual dispatch selection.
+     *
+     * The pessimistic-lock query MUST execute inside
+     * this transaction.
+     */
     @Override
     @Transactional
     public Rider findBestRider(Order order) {
 
         validateOrder(order);
 
-        /*
-         * IMPORTANT:
-         *
-         * Actual dispatch selection uses the
-         * pessimistic-lock query.
-         */
         List<Rider> riders =
                 riderRepository
                         .findAvailableRidersForDispatch();
 
         if (riders.isEmpty()) {
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "No available riders found"
             );
         }
 
-        /*
-         * Extra validation.
-         */
         riders = riders.stream()
                 .filter(rider ->
                         rider.getLatitude() != null &&
@@ -180,7 +181,7 @@ public class RiderService implements IRiderService {
                 .toList();
 
         if (riders.isEmpty()) {
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "No available riders with valid location found"
             );
         }
@@ -195,7 +196,7 @@ public class RiderService implements IRiderService {
                                         )
                         )
                         .max()
-                        .orElse(1.0);
+                        .orElse(0.0);
 
         double maxTravelTime =
                 riders.stream()
@@ -207,7 +208,7 @@ public class RiderService implements IRiderService {
                                         )
                         )
                         .max()
-                        .orElse(1.0);
+                        .orElse(0.0);
 
         return riders.stream()
                 .min(
@@ -222,25 +223,48 @@ public class RiderService implements IRiderService {
                         )
                 )
                 .orElseThrow(() ->
-                        new RuntimeException(
+                        new IllegalArgumentException(
                                 "Unable to select best rider"
                         )
                 );
     }
 
 
+    /*
+     * Rider evaluation endpoint.
+     *
+     * IMPORTANT:
+     * This method is transactional because the evaluation
+     * also calls findBestRider(), which uses a pessimistic
+     * locking query.
+     */
     @Override
+    @Transactional
     public Map<String, Object> evaluateRiders(
             Order order) {
 
         validateOrder(order);
 
         List<Rider> riders =
-                getAvailableRiders();
+                riderRepository
+                        .findAvailableRidersForDispatch();
 
         if (riders.isEmpty()) {
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "No available riders found"
+            );
+        }
+
+        riders = riders.stream()
+                .filter(rider ->
+                        rider.getLatitude() != null &&
+                                rider.getLongitude() != null
+                )
+                .toList();
+
+        if (riders.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "No available riders with valid location found"
             );
         }
 
@@ -254,7 +278,7 @@ public class RiderService implements IRiderService {
                                         )
                         )
                         .max()
-                        .orElse(1.0);
+                        .orElse(0.0);
 
         double maxTravelTime =
                 riders.stream()
@@ -266,7 +290,7 @@ public class RiderService implements IRiderService {
                                         )
                         )
                         .max()
-                        .orElse(1.0);
+                        .orElse(0.0);
 
         List<Map<String, Object>> evaluations =
                 riders.stream()
@@ -288,6 +312,11 @@ public class RiderService implements IRiderService {
                         )
                         .toList();
 
+        /*
+         * We are already inside a transaction here.
+         * Therefore findBestRider() can safely execute
+         * its pessimistic-lock query.
+         */
         Rider bestRider =
                 findBestRider(order);
 
@@ -328,13 +357,26 @@ public class RiderService implements IRiderService {
     public Rider markRiderUnavailable(
             Long riderId) {
 
+        if (riderId == null) {
+            throw new IllegalArgumentException(
+                    "Rider id is required"
+            );
+        }
+
         Rider rider =
-                getRiderById(riderId);
+                riderRepository
+                        .findByIdForUpdate(riderId)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Rider not found with id: "
+                                                + riderId
+                                )
+                        );
 
         if (!Boolean.TRUE.equals(
                 rider.getAvailable())) {
 
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "Rider is already unavailable"
             );
         }
@@ -350,13 +392,26 @@ public class RiderService implements IRiderService {
     public Rider markRiderAvailable(
             Long riderId) {
 
+        if (riderId == null) {
+            throw new IllegalArgumentException(
+                    "Rider id is required"
+            );
+        }
+
         Rider rider =
-                getRiderById(riderId);
+                riderRepository
+                        .findByIdForUpdate(riderId)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException(
+                                        "Rider not found with id: "
+                                                + riderId
+                                )
+                        );
 
         if (!Boolean.TRUE.equals(
                 rider.getActive())) {
 
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "Cannot make inactive rider available"
             );
         }
@@ -373,7 +428,7 @@ public class RiderService implements IRiderService {
             Long orderId) {
 
         if (orderId == null) {
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Order id is required"
             );
         }
@@ -384,7 +439,7 @@ public class RiderService implements IRiderService {
                 );
 
         if (dispatches.isEmpty()) {
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "No dispatch found for order: "
                             + orderId
             );
@@ -401,7 +456,7 @@ public class RiderService implements IRiderService {
                                 )
                         )
                         .orElseThrow(() ->
-                                new RuntimeException(
+                                new IllegalArgumentException(
                                         "No rider assigned to order: "
                                                 + orderId
                                 )
@@ -429,8 +484,7 @@ public class RiderService implements IRiderService {
                 );
 
         double totalDistance =
-                riderToKitchenDistance
-                        +
+                riderToKitchenDistance +
                         kitchenToCustomerDistance;
 
         double riderToKitchenTime =
@@ -444,8 +498,7 @@ public class RiderService implements IRiderService {
                 );
 
         double totalTravelTime =
-                riderToKitchenTime
-                        +
+                riderToKitchenTime +
                         kitchenToCustomerTime;
 
         double score =
@@ -549,12 +602,10 @@ public class RiderService implements IRiderService {
 
         return
                 RIDER_TO_KITCHEN_WEIGHT
-                        *
-                        normalizedDistance
+                        * normalizedDistance
                         +
                         TOTAL_TRAVEL_TIME_WEIGHT
-                                *
-                                normalizedTravelTime;
+                                * normalizedTravelTime;
     }
 
 
@@ -605,8 +656,7 @@ public class RiderService implements IRiderService {
                 );
 
         return calculateTravelTime(
-                riderToKitchenDistance
-                        +
+                riderToKitchenDistance +
                         kitchenToCustomerDistance
         );
     }
@@ -629,13 +679,19 @@ public class RiderService implements IRiderService {
     private void validateOrder(Order order) {
 
         if (order == null) {
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Order is required"
             );
         }
 
+        if (order.getId() == null) {
+            throw new IllegalArgumentException(
+                    "Order id is required"
+            );
+        }
+
         if (order.getKitchen() == null) {
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     "Order kitchen is required"
             );
         }
@@ -643,21 +699,17 @@ public class RiderService implements IRiderService {
         Kitchen kitchen =
                 order.getKitchen();
 
-        if (kitchen.getLatitude() == null ||
-                kitchen.getLongitude() == null) {
+        validateCoordinates(
+                kitchen.getLatitude(),
+                kitchen.getLongitude(),
+                "Kitchen"
+        );
 
-            throw new RuntimeException(
-                    "Kitchen location is required"
-            );
-        }
-
-        if (order.getDeliveryLatitude() == null ||
-                order.getDeliveryLongitude() == null) {
-
-            throw new RuntimeException(
-                    "Order delivery location is required"
-            );
-        }
+        validateCoordinates(
+                order.getDeliveryLatitude(),
+                order.getDeliveryLongitude(),
+                "Delivery"
+        );
     }
 
 
@@ -669,7 +721,7 @@ public class RiderService implements IRiderService {
         if (latitude == null ||
                 longitude == null) {
 
-            throw new RuntimeException(
+            throw new IllegalArgumentException(
                     entity + " location is required"
             );
         }
@@ -677,16 +729,18 @@ public class RiderService implements IRiderService {
         if (latitude < -90 ||
                 latitude > 90) {
 
-            throw new RuntimeException(
-                    entity + " latitude must be between -90 and 90"
+            throw new IllegalArgumentException(
+                    entity +
+                            " latitude must be between -90 and 90"
             );
         }
 
         if (longitude < -180 ||
                 longitude > 180) {
 
-            throw new RuntimeException(
-                    entity + " longitude must be between -180 and 180"
+            throw new IllegalArgumentException(
+                    entity +
+                            " longitude must be between -180 and 180"
             );
         }
     }
@@ -739,7 +793,8 @@ public class RiderService implements IRiderService {
     }
 
 
-    private double round(double value) {
+    private double round(
+            double value) {
 
         return Math.round(
                 value * 100.0
