@@ -67,6 +67,20 @@ public class RiderService implements IRiderService {
                         ));
     }
 
+    @Override
+    public Rider markRiderUnavailable(Long id) {
+
+        Rider rider = riderRepository.findById(id)
+                .orElseThrow(() ->
+                        new RuntimeException(
+                                "Rider not found with id: " + id
+                        ));
+
+        rider.setAvailable(false);
+
+        return riderRepository.save(rider);
+    }
+
     private double calculateDistance(
             double lat1,
             double lon1,
