@@ -18,26 +18,20 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class RiderService implements IRiderService {
 
-    private static final double
-            AVERAGE_RIDER_SPEED_KMH = 30.0;
+    private static final double AVERAGE_RIDER_SPEED_KMH = 30.0;
 
     /*
-     * Rider -> Kitchen
+     * Weight used for rider selection.
+     *
+     * Rider -> Kitchen is the only part of the route
+     * that differs between riders for the same order.
      */
-    private static final double
-            RIDER_TO_KITCHEN_WEIGHT = 0.40;
+    private static final double RIDER_TO_KITCHEN_WEIGHT = 0.70;
 
     /*
-     * Kitchen -> Customer
+     * Total travel time is also considered.
      */
-    private static final double
-            KITCHEN_TO_CUSTOMER_WEIGHT = 0.40;
-
-    /*
-     * Total travel time
-     */
-    private static final double
-            TRAVEL_TIME_WEIGHT = 0.20;
+    private static final double TOTAL_TRAVEL_TIME_WEIGHT = 0.30;
 
     private final RiderRepository riderRepository;
 
@@ -45,7 +39,6 @@ public class RiderService implements IRiderService {
     public Rider createRider(Rider rider) {
 
         if (rider == null) {
-
             throw new RuntimeException(
                     "Rider is required"
             );
@@ -64,6 +57,12 @@ public class RiderService implements IRiderService {
 
     @Override
     public Rider getRiderById(Long id) {
+
+        if (id == null) {
+            throw new RuntimeException(
+                    "Rider id is required"
+            );
+        }
 
         return riderRepository
                 .findById(id)
@@ -98,6 +97,12 @@ public class RiderService implements IRiderService {
         List<Rider> riders =
                 getValidAvailableRiders();
 
+        if (riders.isEmpty()) {
+            throw new RuntimeException(
+                    "No available riders found"
+            );
+        }
+
         return riders.stream()
                 .min(
                         Comparator.comparingDouble(
@@ -112,7 +117,7 @@ public class RiderService implements IRiderService {
                 )
                 .orElseThrow(() ->
                         new RuntimeException(
-                                "No available rider found"
+                                "Unable to find nearest rider"
                         )
                 );
     }
@@ -122,168 +127,148 @@ public class RiderService implements IRiderService {
 
         validateOrder(order);
 
-        Kitchen kitchen =
-                order.getKitchen();
-
         List<Rider> riders =
                 getValidAvailableRiders();
 
         if (riders.isEmpty()) {
-
             throw new RuntimeException(
                     "No available riders found"
             );
         }
 
         /*
-         * Calculate maximum values first.
-         *
-         * These are required for normalization.
+         * Calculate the maximum values for normalization.
          */
-        double maxRiderToKitchenDistance =
+        double maxDistance =
                 riders.stream()
                         .mapToDouble(rider ->
-                                calculateDistance(
-                                        rider.getLatitude(),
-                                        rider.getLongitude(),
-                                        kitchen.getLatitude(),
-                                        kitchen.getLongitude()
+                                calculateRiderToKitchenDistance(
+                                        order,
+                                        rider
                                 )
                         )
                         .max()
                         .orElse(1.0);
 
-        double kitchenToCustomerDistance =
-                calculateDistance(
-                        kitchen.getLatitude(),
-                        kitchen.getLongitude(),
-                        order.getDeliveryLatitude(),
-                        order.getDeliveryLongitude()
-                );
-
-        /*
-         * Same kitchen/customer distance for every rider,
-         * because every rider delivers the same order.
-         *
-         * We still include it in the scoring model because
-         * it represents the actual delivery burden of the order.
-         */
-        double normalizedKitchenToCustomerDistance =
-                kitchenToCustomerDistance == 0
-                        ? 0
-                        : 1;
-
-        /*
-         * Calculate maximum total travel time.
-         */
-        double maxTotalTravelTime =
+        double maxTravelTime =
                 riders.stream()
-                        .mapToDouble(rider -> {
-
-                            double riderToKitchen =
-                                    calculateDistance(
-                                            rider.getLatitude(),
-                                            rider.getLongitude(),
-                                            kitchen.getLatitude(),
-                                            kitchen.getLongitude()
-                                    );
-
-                            return calculateTravelTime(
-                                    riderToKitchen +
-                                            kitchenToCustomerDistance
-                            );
-                        })
+                        .mapToDouble(rider ->
+                                calculateTotalTravelTime(
+                                        order,
+                                        rider
+                                )
+                        )
                         .max()
                         .orElse(1.0);
 
-        /*
-         * Select rider with lowest score.
-         */
         return riders.stream()
                 .min(
                         Comparator.comparingDouble(
-                                rider -> {
-
-                                    double riderToKitchenDistance =
-                                            calculateDistance(
-                                                    rider.getLatitude(),
-                                                    rider.getLongitude(),
-                                                    kitchen.getLatitude(),
-                                                    kitchen.getLongitude()
-                                            );
-
-                                    double totalDistance =
-                                            riderToKitchenDistance
-                                                    +
-                                                    kitchenToCustomerDistance;
-
-                                    double totalTravelTime =
-                                            calculateTravelTime(
-                                                    totalDistance
-                                            );
-
-                                    /*
-                                     * Normalize rider -> kitchen.
-                                     */
-                                    double normalizedRiderToKitchen =
-                                            maxRiderToKitchenDistance == 0
-                                                    ? 0
-                                                    :
-                                                    riderToKitchenDistance
-                                                            /
-                                                            maxRiderToKitchenDistance;
-
-                                    /*
-                                     * Normalize delivery distance.
-                                     *
-                                     * Since all riders have the same
-                                     * kitchen -> customer distance,
-                                     * this component is equal for all
-                                     * riders and therefore doesn't
-                                     * influence the ranking.
-                                     */
-                                    double normalizedKitchenToCustomer =
-                                            normalizedKitchenToCustomerDistance;
-
-                                    /*
-                                     * Normalize total travel time.
-                                     */
-                                    double normalizedTravelTime =
-                                            maxTotalTravelTime == 0
-                                                    ? 0
-                                                    :
-                                                    totalTravelTime
-                                                            /
-                                                            maxTotalTravelTime;
-
-                                    /*
-                                     * Final score.
-                                     *
-                                     * Lower = better.
-                                     */
-                                    return
-                                            (RIDER_TO_KITCHEN_WEIGHT
-                                                    *
-                                                    normalizedRiderToKitchen)
-
-                                                    +
-
-                                                    (KITCHEN_TO_CUSTOMER_WEIGHT
-                                                            *
-                                                            normalizedKitchenToCustomer)
-
-                                                    +
-
-                                                    (TRAVEL_TIME_WEIGHT
-                                                            *
-                                                            normalizedTravelTime);
-                                }
+                                rider ->
+                                        calculateScore(
+                                                order,
+                                                rider,
+                                                maxDistance,
+                                                maxTravelTime
+                                        )
                         )
                 )
                 .orElseThrow(() ->
                         new RuntimeException(
                                 "Unable to select best rider"
-                        ));
+                        )
+                );
+    }
+
+    @Override
+    public Map<String, Object> evaluateRiders(
+            Order order) {
+
+        validateOrder(order);
+
+        List<Rider> riders =
+                getValidAvailableRiders();
+
+        if (riders.isEmpty()) {
+            throw new RuntimeException(
+                    "No available riders found"
+            );
+        }
+
+        double maxDistance =
+                riders.stream()
+                        .mapToDouble(rider ->
+                                calculateRiderToKitchenDistance(
+                                        order,
+                                        rider
+                                )
+                        )
+                        .max()
+                        .orElse(1.0);
+
+        double maxTravelTime =
+                riders.stream()
+                        .mapToDouble(rider ->
+                                calculateTotalTravelTime(
+                                        order,
+                                        rider
+                                )
+                        )
+                        .max()
+                        .orElse(1.0);
+
+        List<Map<String, Object>> evaluations =
+                riders.stream()
+                        .map(rider ->
+                                evaluateRider(
+                                        order,
+                                        rider,
+                                        maxDistance,
+                                        maxTravelTime
+                                )
+                        )
+                        .sorted(
+                                Comparator.comparingDouble(
+                                        item ->
+                                                ((Number) item.get(
+                                                        "score"
+                                                )).doubleValue()
+                                )
+                        )
+                        .toList();
+
+        Rider bestRider =
+                findBestRider(order);
+
+        Map<String, Object> result =
+                new LinkedHashMap<>();
+
+        result.put(
+                "orderId",
+                order.getId()
+        );
+
+        result.put(
+                "availableRiderCount",
+                riders.size()
+        );
+
+        result.put(
+                "riders",
+                evaluations
+        );
+
+        result.put(
+                "selectedRiderId",
+                bestRider.getId()
+        );
+
+        result.put(
+                "selectionReason",
+                "Rider with the lowest dispatch score was selected"
+        );
+
+        return result;
     }
 
     @Override
@@ -328,135 +313,21 @@ public class RiderService implements IRiderService {
         return riderRepository.save(rider);
     }
 
-    private List<Rider> getValidAvailableRiders() {
-
-        return riderRepository
-                .findByAvailableTrueAndActiveTrue()
-                .stream()
-                .filter(rider ->
-                        rider.getLatitude() != null &&
-                                rider.getLongitude() != null
-                )
-                .toList();
-    }
-
-    private void validateOrder(Order order) {
-
-        if (order == null) {
-
-            throw new RuntimeException(
-                    "Order is required"
-            );
-        }
-
-        if (order.getKitchen() == null) {
-
-            throw new RuntimeException(
-                    "Order kitchen is required"
-            );
-        }
-
-        if (order.getKitchen().getLatitude() == null ||
-                order.getKitchen().getLongitude() == null) {
-
-            throw new RuntimeException(
-                    "Kitchen location is required"
-            );
-        }
-
-        if (order.getDeliveryLatitude() == null ||
-                order.getDeliveryLongitude() == null) {
-
-            throw new RuntimeException(
-                    "Order delivery location is required"
-            );
-        }
-    }
-
-    @Override
-    public Map<String, Object> evaluateRiders(
-            Order order) {
-
-        validateOrder(order);
-
-        Kitchen kitchen =
-                order.getKitchen();
-
-        List<Rider> riders =
-                getValidAvailableRiders();
-
-        if (riders.isEmpty()) {
-
-            throw new RuntimeException(
-                    "No available riders found"
-            );
-        }
-
-        List<Map<String, Object>> evaluations =
-                riders.stream()
-                        .map(rider ->
-                                evaluateRider(
-                                        order,
-                                        rider
-                                )
-                        )
-                        .toList();
-
-        Map<String, Object> result =
-                new LinkedHashMap<>();
-
-        Rider bestRider =
-                findBestRider(order);
-
-        result.put(
-                "orderId",
-                order.getId()
-        );
-
-        result.put(
-                "availableRiderCount",
-                riders.size()
-        );
-
-        result.put(
-                "riders",
-                evaluations
-        );
-
-        result.put(
-                "selectedRiderId",
-                bestRider.getId()
-        );
-
-        result.put(
-                "selectionReason",
-                "Rider with the lowest dispatch score was selected"
-        );
-
-        return result;
-    }
-
     private Map<String, Object> evaluateRider(
             Order order,
-            Rider rider) {
-
-        Kitchen kitchen =
-                order.getKitchen();
+            Rider rider,
+            double maxDistance,
+            double maxTravelTime) {
 
         double riderToKitchenDistance =
-                calculateDistance(
-                        rider.getLatitude(),
-                        rider.getLongitude(),
-                        kitchen.getLatitude(),
-                        kitchen.getLongitude()
+                calculateRiderToKitchenDistance(
+                        order,
+                        rider
                 );
 
         double kitchenToCustomerDistance =
-                calculateDistance(
-                        kitchen.getLatitude(),
-                        kitchen.getLongitude(),
-                        order.getDeliveryLatitude(),
-                        order.getDeliveryLongitude()
+                calculateKitchenToCustomerDistance(
+                        order
                 );
 
         double totalDistance =
@@ -479,50 +350,171 @@ public class RiderService implements IRiderService {
                         +
                         kitchenToCustomerTime;
 
-        Map<String, Object> evaluation =
+        double score =
+                calculateScore(
+                        riderToKitchenDistance,
+                        totalTravelTime,
+                        maxDistance,
+                        maxTravelTime
+                );
+
+        Map<String, Object> result =
                 new LinkedHashMap<>();
 
-        evaluation.put(
+        result.put(
                 "riderId",
                 rider.getId()
         );
 
-        evaluation.put(
+        result.put(
                 "riderName",
                 rider.getName()
         );
 
-        evaluation.put(
+        result.put(
                 "riderToKitchenDistanceKm",
                 round(riderToKitchenDistance)
         );
 
-        evaluation.put(
+        result.put(
                 "kitchenToCustomerDistanceKm",
                 round(kitchenToCustomerDistance)
         );
 
-        evaluation.put(
+        result.put(
                 "totalDistanceKm",
                 round(totalDistance)
         );
 
-        evaluation.put(
+        result.put(
                 "riderToKitchenTimeMinutes",
-                Math.ceil(riderToKitchenTime)
+                round(riderToKitchenTime)
         );
 
-        evaluation.put(
+        result.put(
                 "kitchenToCustomerTimeMinutes",
-                Math.ceil(kitchenToCustomerTime)
+                round(kitchenToCustomerTime)
         );
 
-        evaluation.put(
+        result.put(
                 "totalTravelTimeMinutes",
-                Math.ceil(totalTravelTime)
+                round(totalTravelTime)
         );
 
-        return evaluation;
+        result.put(
+                "score",
+                round(score)
+        );
+
+        return result;
+    }
+
+    private double calculateScore(
+            Order order,
+            Rider rider,
+            double maxDistance,
+            double maxTravelTime) {
+
+        double riderToKitchenDistance =
+                calculateRiderToKitchenDistance(
+                        order,
+                        rider
+                );
+
+        double totalTravelTime =
+                calculateTotalTravelTime(
+                        order,
+                        rider
+                );
+
+        return calculateScore(
+                riderToKitchenDistance,
+                totalTravelTime,
+                maxDistance,
+                maxTravelTime
+        );
+    }
+
+    private double calculateScore(
+            double riderToKitchenDistance,
+            double totalTravelTime,
+            double maxDistance,
+            double maxTravelTime) {
+
+        double normalizedDistance =
+                maxDistance == 0
+                        ? 0
+                        : riderToKitchenDistance
+                        / maxDistance;
+
+        double normalizedTravelTime =
+                maxTravelTime == 0
+                        ? 0
+                        : totalTravelTime
+                        / maxTravelTime;
+
+        /*
+         * Lower score = better rider.
+         */
+        return
+                (RIDER_TO_KITCHEN_WEIGHT
+                        * normalizedDistance)
+
+                        +
+
+                        (TOTAL_TRAVEL_TIME_WEIGHT
+                                * normalizedTravelTime);
+    }
+
+    private double calculateRiderToKitchenDistance(
+            Order order,
+            Rider rider) {
+
+        Kitchen kitchen =
+                order.getKitchen();
+
+        return calculateDistance(
+                rider.getLatitude(),
+                rider.getLongitude(),
+                kitchen.getLatitude(),
+                kitchen.getLongitude()
+        );
+    }
+
+    private double calculateKitchenToCustomerDistance(
+            Order order) {
+
+        Kitchen kitchen =
+                order.getKitchen();
+
+        return calculateDistance(
+                kitchen.getLatitude(),
+                kitchen.getLongitude(),
+                order.getDeliveryLatitude(),
+                order.getDeliveryLongitude()
+        );
+    }
+
+    private double calculateTotalTravelTime(
+            Order order,
+            Rider rider) {
+
+        double riderToKitchenDistance =
+                calculateRiderToKitchenDistance(
+                        order,
+                        rider
+                );
+
+        double kitchenToCustomerDistance =
+                calculateKitchenToCustomerDistance(
+                        order
+                );
+
+        return calculateTravelTime(
+                riderToKitchenDistance
+                        +
+                        kitchenToCustomerDistance
+        );
     }
 
     private double calculateTravelTime(
@@ -533,6 +525,50 @@ public class RiderService implements IRiderService {
                         AVERAGE_RIDER_SPEED_KMH;
 
         return travelTimeHours * 60;
+    }
+
+    private List<Rider> getValidAvailableRiders() {
+
+        return riderRepository
+                .findByAvailableTrueAndActiveTrue()
+                .stream()
+                .filter(rider ->
+                        rider.getLatitude() != null
+                                &&
+                                rider.getLongitude() != null
+                )
+                .toList();
+    }
+
+    private void validateOrder(Order order) {
+
+        if (order == null) {
+            throw new RuntimeException(
+                    "Order is required"
+            );
+        }
+
+        if (order.getKitchen() == null) {
+            throw new RuntimeException(
+                    "Order kitchen is required"
+            );
+        }
+
+        if (order.getKitchen().getLatitude() == null ||
+                order.getKitchen().getLongitude() == null) {
+
+            throw new RuntimeException(
+                    "Kitchen location is required"
+            );
+        }
+
+        if (order.getDeliveryLatitude() == null ||
+                order.getDeliveryLongitude() == null) {
+
+            throw new RuntimeException(
+                    "Order delivery location is required"
+            );
+        }
     }
 
     private double calculateDistance(
@@ -571,13 +607,9 @@ public class RiderService implements IRiderService {
 
                                 *
 
-                                Math.sin(
-                                        lonDistance / 2
-                                )
+                                Math.sin(lonDistance / 2)
                                 *
-                                Math.sin(
-                                        lonDistance / 2
-                                );
+                                Math.sin(lonDistance / 2);
 
         double c =
                 2 *
@@ -587,5 +619,12 @@ public class RiderService implements IRiderService {
                         );
 
         return EARTH_RADIUS_KM * c;
+    }
+
+    private double round(double value) {
+
+        return Math.round(
+                value * 100.0
+        ) / 100.0;
     }
 }

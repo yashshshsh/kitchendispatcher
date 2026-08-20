@@ -17,17 +17,9 @@ import java.util.Map;
 public class DispatchDecisionService
         implements IDispatchDecisionService {
 
-    /*
-     * Assumed average rider speed.
-     *
-     * Later this can be replaced by a real
-     * maps/routing service.
-     */
-    private static final double
-            AVERAGE_RIDER_SPEED_KMH = 30.0;
+    private final IPreparationTimeService preparationTimeService;
 
-    private final IPreparationTimeService
-            preparationTimeService;
+    private static final double AVERAGE_RIDER_SPEED_KMH = 30.0;
 
     @Override
     public Map<String, Object> calculateDispatchDecision(
@@ -37,54 +29,39 @@ public class DispatchDecisionService
         validateOrder(order);
         validateRider(rider);
 
-        /*
-         * Use the preparation time already calculated
-         * for this order.
-         *
-         * If it is missing, calculate it once.
-         */
         Integer preparationTime =
                 getPreparationTime(order);
 
-        /*
-         * IMPORTANT:
-         *
-         * Food ready time is based on the ORIGINAL
-         * order creation time.
-         *
-         * It must NOT use LocalDateTime.now().
-         */
         LocalDateTime foodReadyTime =
                 order.getCreatedAt()
-                        .plusMinutes(
-                                preparationTime
-                        );
+                        .plusMinutes(preparationTime);
 
-        double travelDistance =
-                calculateTravelDistance(
-                        order,
-                        rider
+        double riderToKitchenDistance =
+                calculateDistance(
+                        rider.getLatitude(),
+                        rider.getLongitude(),
+                        order.getKitchen().getLatitude(),
+                        order.getKitchen().getLongitude()
                 );
 
-        int travelTimeMinutes =
+        int riderTravelTime =
                 calculateTravelTimeMinutes(
-                        order,
-                        rider
+                        riderToKitchenDistance
                 );
 
         LocalDateTime optimalDispatchTime =
                 foodReadyTime.minusMinutes(
-                        travelTimeMinutes
+                        riderTravelTime
                 );
 
         LocalDateTime now =
                 LocalDateTime.now();
 
-        /*
-         * Never return a dispatch time in the past.
-         */
+        boolean dispatchNow =
+                !optimalDispatchTime.isAfter(now);
+
         LocalDateTime recommendedDispatchTime =
-                optimalDispatchTime.isBefore(now)
+                dispatchNow
                         ? now
                         : optimalDispatchTime;
 
@@ -117,13 +94,13 @@ public class DispatchDecisionService
         );
 
         result.put(
-                "riderTravelDistanceKm",
-                round(travelDistance)
+                "riderToKitchenDistanceKm",
+                round(riderToKitchenDistance)
         );
 
         result.put(
                 "riderTravelTimeMinutes",
-                travelTimeMinutes
+                riderTravelTime
         );
 
         result.put(
@@ -137,17 +114,22 @@ public class DispatchDecisionService
         );
 
         result.put(
-                "dispatchImmediately",
-                !optimalDispatchTime.isAfter(now)
+                "dispatchNow",
+                dispatchNow
         );
 
         result.put(
                 "decision",
-                buildDecisionMessage(
-                        optimalDispatchTime,
-                        now,
-                        travelTimeMinutes
-                )
+                dispatchNow
+                        ? "DISPATCH_NOW"
+                        : "WAIT"
+        );
+
+        result.put(
+                "decisionReason",
+                dispatchNow
+                        ? "The optimal dispatch time has arrived."
+                        : "Wait until the rider should leave to reach the kitchen when the food is ready."
         );
 
         return result;
@@ -163,9 +145,7 @@ public class DispatchDecisionService
                 getPreparationTime(order);
 
         return order.getCreatedAt()
-                .plusMinutes(
-                        preparationTime
-                );
+                .plusMinutes(preparationTime);
     }
 
     @Override
@@ -180,10 +160,10 @@ public class DispatchDecisionService
                 order.getKitchen();
 
         return calculateDistance(
-                kitchen.getLatitude(),
-                kitchen.getLongitude(),
                 rider.getLatitude(),
-                rider.getLongitude()
+                rider.getLongitude(),
+                kitchen.getLatitude(),
+                kitchen.getLongitude()
         );
     }
 
@@ -198,26 +178,8 @@ public class DispatchDecisionService
                         rider
                 );
 
-        /*
-         * time = distance / speed
-         *
-         * Convert hours to minutes.
-         */
-        double travelTimeHours =
-                distance /
-                        AVERAGE_RIDER_SPEED_KMH;
-
-        double travelTimeMinutes =
-                travelTimeHours * 60;
-
-        /*
-         * At least one minute for a non-zero trip.
-         */
-        return Math.max(
-                1,
-                (int) Math.ceil(
-                        travelTimeMinutes
-                )
+        return calculateTravelTimeMinutes(
+                distance
         );
     }
 
@@ -232,18 +194,11 @@ public class DispatchDecisionService
         Integer preparationTime =
                 getPreparationTime(order);
 
-        /*
-         * IMPORTANT:
-         *
-         * Use order.getCreatedAt(), NOT now().
-         */
         LocalDateTime foodReadyTime =
                 order.getCreatedAt()
-                        .plusMinutes(
-                                preparationTime
-                        );
+                        .plusMinutes(preparationTime);
 
-        int travelTimeMinutes =
+        int travelTime =
                 calculateTravelTimeMinutes(
                         order,
                         rider
@@ -251,18 +206,13 @@ public class DispatchDecisionService
 
         LocalDateTime optimalDispatchTime =
                 foodReadyTime.minusMinutes(
-                        travelTimeMinutes
+                        travelTime
                 );
 
-        /*
-         * If dispatch time has already arrived,
-         * return the current time.
-         */
         LocalDateTime now =
                 LocalDateTime.now();
 
         if (optimalDispatchTime.isBefore(now)) {
-
             return now;
         }
 
@@ -272,20 +222,15 @@ public class DispatchDecisionService
     private Integer getPreparationTime(
             Order order) {
 
-        if (order.getEstimatedPreparationTime()
-                != null &&
-                order.getEstimatedPreparationTime()
-                        > 0) {
+        if (order.getEstimatedPreparationTime() != null &&
+                order.getEstimatedPreparationTime() > 0) {
 
-            return order
-                    .getEstimatedPreparationTime();
+            return order.getEstimatedPreparationTime();
         }
 
         Integer preparationTime =
                 preparationTimeService
-                        .estimatePreparationTime(
-                                order
-                        );
+                        .estimatePreparationTime(order);
 
         if (preparationTime == null ||
                 preparationTime <= 0) {
@@ -298,42 +243,104 @@ public class DispatchDecisionService
         return preparationTime;
     }
 
+    private int calculateTravelTimeMinutes(
+            double distanceKm) {
+
+        if (distanceKm <= 0) {
+            return 0;
+        }
+
+        double travelTimeHours =
+                distanceKm /
+                        AVERAGE_RIDER_SPEED_KMH;
+
+        return Math.max(
+                1,
+                (int) Math.ceil(
+                        travelTimeHours * 60
+                )
+        );
+    }
+
+    private double calculateDistance(
+            double lat1,
+            double lon1,
+            double lat2,
+            double lon2) {
+
+        final double EARTH_RADIUS_KM =
+                6371.0;
+
+        double latDistance =
+                Math.toRadians(
+                        lat2 - lat1
+                );
+
+        double lonDistance =
+                Math.toRadians(
+                        lon2 - lon1
+                );
+
+        double a =
+                Math.sin(latDistance / 2)
+                        *
+                        Math.sin(latDistance / 2)
+
+                        +
+
+                        Math.cos(
+                                Math.toRadians(lat1)
+                        )
+                                *
+                                Math.cos(
+                                        Math.toRadians(lat2)
+                                )
+
+                                *
+
+                                Math.sin(lonDistance / 2)
+                                *
+                                Math.sin(lonDistance / 2);
+
+        double c =
+                2 *
+                        Math.atan2(
+                                Math.sqrt(a),
+                                Math.sqrt(1 - a)
+                        );
+
+        return EARTH_RADIUS_KM * c;
+    }
+
     private void validateOrder(
             Order order) {
 
         if (order == null) {
-
             throw new RuntimeException(
                     "Order is required"
             );
         }
 
         if (order.getId() == null) {
-
             throw new RuntimeException(
                     "Order id is required"
             );
         }
 
         if (order.getCreatedAt() == null) {
-
             throw new RuntimeException(
                     "Order creation time is required"
             );
         }
 
         if (order.getKitchen() == null) {
-
             throw new RuntimeException(
                     "Order kitchen is required"
             );
         }
 
-        Kitchen kitchen =
-                order.getKitchen();
-
-        if (kitchen.getLatitude() == null ||
-                kitchen.getLongitude() == null) {
+        if (order.getKitchen().getLatitude() == null ||
+                order.getKitchen().getLongitude() == null) {
 
             throw new RuntimeException(
                     "Kitchen location is required"
@@ -345,14 +352,12 @@ public class DispatchDecisionService
             Rider rider) {
 
         if (rider == null) {
-
             throw new RuntimeException(
                     "Rider is required"
             );
         }
 
         if (rider.getId() == null) {
-
             throw new RuntimeException(
                     "Rider id is required"
             );
@@ -381,75 +386,6 @@ public class DispatchDecisionService
                     "Rider location is required"
             );
         }
-    }
-
-    private double calculateDistance(
-            double lat1,
-            double lon1,
-            double lat2,
-            double lon2) {
-
-        final double EARTH_RADIUS_KM =
-                6371.0;
-
-        double latDistance =
-                Math.toRadians(
-                        lat2 - lat1
-                );
-
-        double lonDistance =
-                Math.toRadians(
-                        lon2 - lon1
-                );
-
-        double a =
-                Math.sin(latDistance / 2)
-                        *
-                        Math.sin(latDistance / 2)
-                        +
-                        Math.cos(
-                                Math.toRadians(lat1)
-                        )
-                                *
-                                Math.cos(
-                                        Math.toRadians(lat2)
-                                )
-                                *
-                                Math.sin(
-                                        lonDistance / 2
-                                )
-                                *
-                                Math.sin(
-                                        lonDistance / 2
-                                );
-
-        double c =
-                2 *
-                        Math.atan2(
-                                Math.sqrt(a),
-                                Math.sqrt(1 - a)
-                        );
-
-        return EARTH_RADIUS_KM * c;
-    }
-
-    private String buildDecisionMessage(
-            LocalDateTime optimalDispatchTime,
-            LocalDateTime now,
-            int travelTimeMinutes) {
-
-        if (!optimalDispatchTime.isAfter(now)) {
-
-            return
-                    "Dispatch rider now because " +
-                            "the optimal dispatch time has arrived.";
-        }
-
-        return
-                "Wait until the optimal dispatch time, " +
-                        "which is approximately " +
-                        travelTimeMinutes +
-                        " minutes before food is ready.";
     }
 
     private double round(
