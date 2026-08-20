@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
 import java.util.List;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
@@ -101,6 +102,40 @@ public class RiderService implements IRiderService {
                         new RuntimeException(
                                 "Unable to find nearest rider"
                         ));
+    }
+
+    @Override
+    @Transactional
+    public void markRiderUnavailable(
+            Long riderId) {
+
+        Rider rider =
+                getRiderById(riderId);
+
+        rider.setAvailable(false);
+
+        riderRepository.save(rider);
+    }
+
+    @Override
+    @Transactional
+    public void markRiderAvailable(
+            Long riderId) {
+
+        Rider rider =
+                getRiderById(riderId);
+
+        if (!Boolean.TRUE.equals(
+                rider.getActive())) {
+
+            throw new RuntimeException(
+                    "Cannot make inactive rider available"
+            );
+        }
+
+        rider.setAvailable(true);
+
+        riderRepository.save(rider);
     }
 
     @Override

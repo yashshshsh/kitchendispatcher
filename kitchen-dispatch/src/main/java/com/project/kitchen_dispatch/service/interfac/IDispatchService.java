@@ -10,4 +10,8 @@ public interface IDispatchService {
     Dispatch getDispatchById(Long id);
 
     Dispatch automaticallyDispatchOrder(Order order);
+
+    Dispatch markPickedUp(Long dispatchId);
+
+    Dispatch markDelivered(Long dispatchId);
 }

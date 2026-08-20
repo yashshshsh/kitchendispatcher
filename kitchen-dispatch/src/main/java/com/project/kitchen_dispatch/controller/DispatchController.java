@@ -43,6 +43,32 @@ public class DispatchController {
         );
     }
 
+    @PostMapping("/{id}/pickup")
+    public ResponseEntity<Dispatch>
+    markPickedUp(
+            @PathVariable Long id) {
+
+        Dispatch dispatch =
+                dispatchService.markPickedUp(id);
+
+        return ResponseEntity.ok(
+                dispatch
+        );
+    }
+
+    @PostMapping("/{id}/deliver")
+    public ResponseEntity<Dispatch>
+    markDelivered(
+            @PathVariable Long id) {
+
+        Dispatch dispatch =
+                dispatchService.markDelivered(id);
+
+        return ResponseEntity.ok(
+                dispatch
+        );
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<Dispatch> getDispatchById(
             @PathVariable Long id) {

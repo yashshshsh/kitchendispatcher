@@ -104,6 +104,80 @@ public class DispatchService
     }
 
     @Override
+    @Transactional
+    public Dispatch markPickedUp(Long dispatchId) {
+
+        Dispatch dispatch =
+                getDispatchById(dispatchId);
+
+        if (!"ASSIGNED".equals(
+                dispatch.getStatus())) {
+
+            throw new RuntimeException(
+                    "Dispatch must be ASSIGNED before pickup"
+            );
+        }
+
+        dispatch.setStatus("PICKED_UP");
+
+        dispatch.setPickedUpAt(
+                LocalDateTime.now()
+        );
+
+        return dispatchRepository.save(
+                dispatch
+        );
+    }
+
+    @Override
+    @Transactional
+    public Dispatch markDelivered(Long dispatchId) {
+
+        Dispatch dispatch =
+                getDispatchById(dispatchId);
+
+        if (!"PICKED_UP".equals(
+                dispatch.getStatus())) {
+
+            throw new RuntimeException(
+                    "Dispatch must be PICKED_UP before delivery"
+            );
+        }
+
+        dispatch.setStatus("DELIVERED");
+
+        dispatch.setDeliveredAt(
+                LocalDateTime.now()
+        );
+
+        Dispatch savedDispatch =
+                dispatchRepository.save(
+                        dispatch
+                );
+
+        /*
+         * Rider has completed the delivery.
+         * Make the rider available again.
+         */
+        riderService.markRiderAvailable(
+                dispatch.getRider().getId()
+        );
+
+        /*
+         * Mark the order as delivered as well.
+         */
+        Order order =
+                dispatch.getOrder();
+
+        if (order != null) {
+
+            order.setStatus("DELIVERED");
+        }
+
+        return savedDispatch;
+    }
+
+    @Override
     public Dispatch getDispatchById(
             Long id) {
 
