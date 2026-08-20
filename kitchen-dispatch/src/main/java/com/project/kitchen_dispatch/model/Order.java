@@ -3,6 +3,8 @@ package com.project.kitchen_dispatch.model;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDateTime;
+
 @Entity
 @Table(name = "orders")
 @Getter
@@ -39,4 +41,27 @@ public class Order {
     private Integer estimatedPreparationTime;
 
     private Integer actualPreparationTime;
+
+    /*
+     * Exact time at which the order was created.
+     *
+     * This is important for dispatch calculations.
+     */
+    @Column(nullable = false)
+    private LocalDateTime createdAt;
+
+    /*
+     * Automatically set when a new order is created.
+     */
+    @PrePersist
+    protected void onCreate() {
+
+        if (createdAt == null) {
+            createdAt = LocalDateTime.now();
+        }
+
+        if (status == null) {
+            status = "PLACED";
+        }
+    }
 }

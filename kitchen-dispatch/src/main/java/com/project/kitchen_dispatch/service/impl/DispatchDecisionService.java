@@ -20,15 +20,14 @@ public class DispatchDecisionService
     /*
      * Assumed average rider speed.
      *
-     * 30 km/h is a reasonable initial value for
-     * an urban delivery simulation.
-     *
      * Later this can be replaced by a real
-     * maps/routing API.
+     * maps/routing service.
      */
-    private static final double AVERAGE_RIDER_SPEED_KMH = 30.0;
+    private static final double
+            AVERAGE_RIDER_SPEED_KMH = 30.0;
 
-    private final IPreparationTimeService preparationTimeService;
+    private final IPreparationTimeService
+            preparationTimeService;
 
     @Override
     public Map<String, Object> calculateDispatchDecision(
@@ -38,17 +37,28 @@ public class DispatchDecisionService
         validateOrder(order);
         validateRider(rider);
 
+        /*
+         * Use the preparation time already calculated
+         * for this order.
+         *
+         * If it is missing, calculate it once.
+         */
         Integer preparationTime =
-                preparationTimeService
-                        .estimatePreparationTime(order);
+                getPreparationTime(order);
 
-        LocalDateTime orderCreatedAt =
-                LocalDateTime.now();
-
+        /*
+         * IMPORTANT:
+         *
+         * Food ready time is based on the ORIGINAL
+         * order creation time.
+         *
+         * It must NOT use LocalDateTime.now().
+         */
         LocalDateTime foodReadyTime =
-                orderCreatedAt.plusMinutes(
-                        preparationTime
-                );
+                order.getCreatedAt()
+                        .plusMinutes(
+                                preparationTime
+                        );
 
         double travelDistance =
                 calculateTravelDistance(
@@ -67,13 +77,15 @@ public class DispatchDecisionService
                         travelTimeMinutes
                 );
 
+        LocalDateTime now =
+                LocalDateTime.now();
+
         /*
-         * If the calculated dispatch time is already
-         * in the past, the rider should be dispatched now.
+         * Never return a dispatch time in the past.
          */
-        LocalDateTime actualDispatchTime =
-                optimalDispatchTime.isBefore(orderCreatedAt)
-                        ? orderCreatedAt
+        LocalDateTime recommendedDispatchTime =
+                optimalDispatchTime.isBefore(now)
+                        ? now
                         : optimalDispatchTime;
 
         Map<String, Object> result =
@@ -87,6 +99,11 @@ public class DispatchDecisionService
         result.put(
                 "riderId",
                 rider.getId()
+        );
+
+        result.put(
+                "orderCreatedAt",
+                order.getCreatedAt()
         );
 
         result.put(
@@ -116,21 +133,19 @@ public class DispatchDecisionService
 
         result.put(
                 "recommendedDispatchTime",
-                actualDispatchTime
+                recommendedDispatchTime
         );
 
         result.put(
                 "dispatchImmediately",
-                actualDispatchTime.equals(
-                        orderCreatedAt
-                )
+                !optimalDispatchTime.isAfter(now)
         );
 
         result.put(
                 "decision",
                 buildDecisionMessage(
-                        actualDispatchTime,
-                        orderCreatedAt,
+                        optimalDispatchTime,
+                        now,
                         travelTimeMinutes
                 )
         );
@@ -145,11 +160,12 @@ public class DispatchDecisionService
         validateOrder(order);
 
         Integer preparationTime =
-                preparationTimeService
-                        .estimatePreparationTime(order);
+                getPreparationTime(order);
 
-        return LocalDateTime.now()
-                .plusMinutes(preparationTime);
+        return order.getCreatedAt()
+                .plusMinutes(
+                        preparationTime
+                );
     }
 
     @Override
@@ -195,8 +211,7 @@ public class DispatchDecisionService
                 travelTimeHours * 60;
 
         /*
-         * Always keep a minimum of one minute
-         * for a non-zero journey.
+         * At least one minute for a non-zero trip.
          */
         return Math.max(
                 1,
@@ -215,11 +230,15 @@ public class DispatchDecisionService
         validateRider(rider);
 
         Integer preparationTime =
-                preparationTimeService
-                        .estimatePreparationTime(order);
+                getPreparationTime(order);
 
+        /*
+         * IMPORTANT:
+         *
+         * Use order.getCreatedAt(), NOT now().
+         */
         LocalDateTime foodReadyTime =
-                LocalDateTime.now()
+                order.getCreatedAt()
                         .plusMinutes(
                                 preparationTime
                         );
@@ -236,34 +255,75 @@ public class DispatchDecisionService
                 );
 
         /*
-         * Never return a dispatch time in the past.
+         * If dispatch time has already arrived,
+         * return the current time.
          */
         LocalDateTime now =
                 LocalDateTime.now();
 
         if (optimalDispatchTime.isBefore(now)) {
+
             return now;
         }
 
         return optimalDispatchTime;
     }
 
+    private Integer getPreparationTime(
+            Order order) {
+
+        if (order.getEstimatedPreparationTime()
+                != null &&
+                order.getEstimatedPreparationTime()
+                        > 0) {
+
+            return order
+                    .getEstimatedPreparationTime();
+        }
+
+        Integer preparationTime =
+                preparationTimeService
+                        .estimatePreparationTime(
+                                order
+                        );
+
+        if (preparationTime == null ||
+                preparationTime <= 0) {
+
+            throw new RuntimeException(
+                    "Invalid preparation time"
+            );
+        }
+
+        return preparationTime;
+    }
+
     private void validateOrder(
             Order order) {
 
         if (order == null) {
+
             throw new RuntimeException(
                     "Order is required"
             );
         }
 
         if (order.getId() == null) {
+
             throw new RuntimeException(
                     "Order id is required"
             );
         }
 
+        if (order.getCreatedAt() == null) {
+
+            throw new RuntimeException(
+                    "Order creation time is required"
+            );
+        }
+
         if (order.getKitchen() == null) {
+
             throw new RuntimeException(
                     "Order kitchen is required"
             );
@@ -285,12 +345,14 @@ public class DispatchDecisionService
             Rider rider) {
 
         if (rider == null) {
+
             throw new RuntimeException(
                     "Rider is required"
             );
         }
 
         if (rider.getId() == null) {
+
             throw new RuntimeException(
                     "Rider id is required"
             );
@@ -321,11 +383,6 @@ public class DispatchDecisionService
         }
     }
 
-    /*
-     * Haversine distance.
-     *
-     * Returns distance in kilometers.
-     */
     private double calculateDistance(
             double lat1,
             double lon1,
@@ -347,7 +404,8 @@ public class DispatchDecisionService
 
         double a =
                 Math.sin(latDistance / 2)
-                        * Math.sin(latDistance / 2)
+                        *
+                        Math.sin(latDistance / 2)
                         +
                         Math.cos(
                                 Math.toRadians(lat1)
@@ -376,20 +434,20 @@ public class DispatchDecisionService
     }
 
     private String buildDecisionMessage(
-            LocalDateTime recommendedDispatchTime,
+            LocalDateTime optimalDispatchTime,
             LocalDateTime now,
             int travelTimeMinutes) {
 
-        if (recommendedDispatchTime.equals(now)) {
+        if (!optimalDispatchTime.isAfter(now)) {
 
             return
-                    "Dispatch rider immediately because " +
-                            "the rider travel time is greater than " +
-                            "or equal to the remaining preparation time.";
+                    "Dispatch rider now because " +
+                            "the optimal dispatch time has arrived.";
         }
 
         return
-                "Dispatch rider approximately " +
+                "Wait until the optimal dispatch time, " +
+                        "which is approximately " +
                         travelTimeMinutes +
                         " minutes before food is ready.";
     }

@@ -27,8 +27,7 @@ public class OrderService
 
     @Override
     @Transactional
-    public Order createOrder(
-            Order order) {
+    public Order createOrder(Order order) {
 
         if (order == null) {
 
@@ -46,7 +45,7 @@ public class OrderService
         }
 
         /*
-         * Load the actual Kitchen from DB.
+         * Load the actual Kitchen from the database.
          */
         Kitchen kitchen =
                 kitchenService.getKitchenById(
@@ -70,14 +69,28 @@ public class OrderService
         }
 
         /*
-         * Attach managed Kitchen entity.
+         * Attach the managed Kitchen entity.
          */
         order.setKitchen(kitchen);
 
         /*
-         * Every new order starts as PLACED.
+         * New orders always begin as PLACED.
          */
         order.setStatus("PLACED");
+
+        /*
+         * Make sure createdAt exists.
+         *
+         * Normally @PrePersist on Order will set this,
+         * but we set it here as well because the dispatch
+         * calculation may need it before the first save.
+         */
+        if (order.getCreatedAt() == null) {
+
+            order.setCreatedAt(
+                    java.time.LocalDateTime.now()
+            );
+        }
 
         /*
          * Estimate preparation time.
@@ -101,15 +114,15 @@ public class OrderService
         );
 
         /*
-         * Save order.
+         * Save the order.
          */
         Order savedOrder =
                 orderRepository.save(order);
 
         /*
-         * Try dispatching the order.
+         * Try to dispatch.
          *
-         * The Dispatch Decision Engine may decide
+         * The dispatch decision engine may determine
          * that the rider should wait.
          */
         var dispatch =
@@ -119,7 +132,7 @@ public class OrderService
                         );
 
         /*
-         * If a rider was actually assigned,
+         * If rider was actually assigned,
          * update order status.
          */
         if (dispatch != null) {
@@ -131,7 +144,7 @@ public class OrderService
         } else {
 
             /*
-             * Rider should not be assigned yet.
+             * Rider is not dispatched yet.
              */
             savedOrder.setStatus(
                     "PLACED"
@@ -144,8 +157,7 @@ public class OrderService
     }
 
     @Override
-    public Order getOrderById(
-            Long id) {
+    public Order getOrderById(Long id) {
 
         return orderRepository
                 .findById(id)
