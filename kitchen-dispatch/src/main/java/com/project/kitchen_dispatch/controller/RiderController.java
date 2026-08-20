@@ -46,4 +46,18 @@ public class RiderController {
                 riderService.getAvailableRiders()
         );
     }
+
+    @GetMapping("/nearest")
+    public ResponseEntity<Rider> findNearestRider(
+            @RequestParam Double latitude,
+            @RequestParam Double longitude) {
+
+        Rider rider =
+                riderService.findNearestRider(
+                        latitude,
+                        longitude
+                );
+
+        return ResponseEntity.ok(rider);
+    }
 }

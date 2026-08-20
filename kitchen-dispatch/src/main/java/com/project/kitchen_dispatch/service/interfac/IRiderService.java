@@ -11,4 +11,6 @@ public interface IRiderService {
     Rider getRiderById(Long id);
 
     List<Rider> getAvailableRiders();
+
+    Rider findNearestRider(Double kitchenLatitude, Double kitchenLongitude);
 }
