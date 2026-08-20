@@ -3,42 +3,41 @@ package com.project.kitchen_dispatch.service.impl;
 import com.project.kitchen_dispatch.model.Dispatch;
 import com.project.kitchen_dispatch.model.Order;
 import com.project.kitchen_dispatch.model.Rider;
+import com.project.kitchen_dispatch.repository.DispatchRepository;
 import com.project.kitchen_dispatch.repository.OrderRepository;
 import com.project.kitchen_dispatch.service.interfac.IDispatchDecisionService;
-import com.project.kitchen_dispatch.service.interfac.IDispatchService;
-import com.project.kitchen_dispatch.service.interfac.IRiderService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
-@Service
+@Component
 @RequiredArgsConstructor
 @Slf4j
 public class DispatchScheduler {
 
     private final OrderRepository orderRepository;
 
-    private final IDispatchDecisionService
-            dispatchDecisionService;
+    private final DispatchRepository dispatchRepository;
 
-    private final IDispatchService
-            dispatchService;
+    private final RiderService riderService;
 
-    private final IRiderService
-            riderService;
+    private final DispatchService dispatchService;
+
+    private final IDispatchDecisionService dispatchDecisionService;
 
 
-    @Scheduled(fixedDelay = 30000)
+    /*
+     * Runs every 30 seconds.
+     */
+    @Scheduled(fixedRate = 30000)
     public void processPendingOrders() {
 
         List<Order> pendingOrders =
-                orderRepository.findByStatus(
-                        "PLACED"
-                );
+                orderRepository.findByStatus("PLACED");
 
         if (pendingOrders.isEmpty()) {
             return;
@@ -55,43 +54,63 @@ public class DispatchScheduler {
 
                 processOrder(order);
 
-            } catch (Exception e) {
+            } catch (Exception exception) {
 
-                /*
-                 * One failed order must not stop
-                 * the remaining orders.
-                 */
-                log.error(
-                        "Failed to process dispatch for order {}",
+                log.warn(
+                        "Could not process order {}: {}",
                         order.getId(),
-                        e
+                        exception.getMessage()
                 );
             }
         }
     }
 
 
-    private void processOrder(
-            Order order) {
+    /*
+     * Processes one pending order.
+     */
+    protected void processOrder(Order order) {
 
         if (order == null ||
                 order.getId() == null) {
 
+            log.warn(
+                    "Skipping invalid order"
+            );
+
             return;
         }
 
 
+        /*
+         * Only PLACED orders should be processed.
+         */
         if (!"PLACED".equals(
-                order.getStatus())) {
+                order.getStatus()
+        )) {
+
+            log.info(
+                    "Skipping order {} because its status is {}",
+                    order.getId(),
+                    order.getStatus()
+            );
 
             return;
         }
 
 
-        if (order.getKitchen() == null) {
+        /*
+         * IMPORTANT:
+         *
+         * Prevent the scheduler from attempting to
+         * create a second dispatch for the same order.
+         */
+        if (dispatchRepository.existsByOrderId(
+                order.getId()
+        )) {
 
-            log.warn(
-                    "Order {} cannot be dispatched: kitchen missing",
+            log.info(
+                    "Skipping order {} because it already has a dispatch",
                     order.getId()
             );
 
@@ -99,30 +118,9 @@ public class DispatchScheduler {
         }
 
 
-        if (order.getKitchen().getLatitude() == null ||
-                order.getKitchen().getLongitude() == null) {
-
-            log.warn(
-                    "Order {} cannot be dispatched: kitchen location missing",
-                    order.getId()
-            );
-
-            return;
-        }
-
-
-        if (order.getDeliveryLatitude() == null ||
-                order.getDeliveryLongitude() == null) {
-
-            log.warn(
-                    "Order {} cannot be dispatched: delivery location missing",
-                    order.getId()
-            );
-
-            return;
-        }
-
-
+        /*
+         * Find the best available rider.
+         */
         Rider rider;
 
         try {
@@ -132,37 +130,43 @@ public class DispatchScheduler {
                             order
                     );
 
-        } catch (RuntimeException e) {
+        } catch (IllegalArgumentException exception) {
 
             log.info(
-                    "Order {} waiting for available rider: {}",
-                    order.getId(),
-                    e.getMessage()
+                    "No available rider for order {}. Will retry later.",
+                    order.getId()
             );
 
             return;
         }
 
 
-        LocalDateTime recommendedDispatchTime =
+        /*
+         * Calculate the optimal dispatch time
+         * using DispatchDecisionService.
+         */
+        LocalDateTime optimalDispatchTime =
                 dispatchDecisionService
                         .calculateOptimalDispatchTime(
                                 order,
                                 rider
                         );
 
+
         LocalDateTime now =
                 LocalDateTime.now();
 
 
-        if (recommendedDispatchTime.isAfter(
-                now
-        )) {
+        /*
+         * Preparation is not ready yet.
+         * Scheduler will check again later.
+         */
+        if (optimalDispatchTime.isAfter(now)) {
 
             log.info(
                     "Order {} waiting until {}. Selected rider: {}",
                     order.getId(),
-                    recommendedDispatchTime,
+                    optimalDispatchTime,
                     rider.getId()
             );
 
@@ -170,51 +174,47 @@ public class DispatchScheduler {
         }
 
 
-        Dispatch dispatch =
-                createDispatch(
-                        order,
-                        rider
-                );
-
-        if (dispatch != null) {
+        /*
+         * Final duplicate-dispatch check.
+         *
+         * This protects against another request/scheduler
+         * creating the dispatch between our first check
+         * and this point.
+         */
+        if (dispatchRepository.existsByOrderId(
+                order.getId()
+        )) {
 
             log.info(
-                    "Order {} dispatched to rider {} at {}",
-                    order.getId(),
-                    rider.getId(),
-                    LocalDateTime.now()
-            );
-        }
-    }
-
-
-    private Dispatch createDispatch(
-            Order order,
-            Rider rider) {
-
-        try {
-
-            Dispatch dispatch =
-                    Dispatch.builder()
-                            .order(order)
-                            .rider(rider)
-                            .build();
-
-            return dispatchService
-                    .createDispatch(
-                            dispatch
-                    );
-
-        } catch (RuntimeException e) {
-
-            log.warn(
-                    "Could not dispatch order {} to rider {}: {}",
-                    order.getId(),
-                    rider.getId(),
-                    e.getMessage()
+                    "Skipping order {} because a dispatch was created while processing",
+                    order.getId()
             );
 
-            return null;
+            return;
         }
+
+
+        /*
+         * Create dispatch.
+         */
+        Dispatch dispatch =
+                Dispatch.builder()
+                        .order(order)
+                        .rider(rider)
+                        .build();
+
+
+        Dispatch createdDispatch =
+                dispatchService.createDispatch(
+                        dispatch
+                );
+
+
+        log.info(
+                "Successfully dispatched order {} to rider {}. Dispatch ID: {}",
+                order.getId(),
+                rider.getId(),
+                createdDispatch.getId()
+        );
     }
 }

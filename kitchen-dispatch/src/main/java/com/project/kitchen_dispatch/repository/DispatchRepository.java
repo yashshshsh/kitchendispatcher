@@ -11,4 +11,11 @@ public interface DispatchRepository
     List<Dispatch> findByOrderId(Long orderId);
 
     List<Dispatch> findByRiderId(Long riderId);
+
+    /*
+     * Used by the dispatch scheduler to prevent
+     * attempting to dispatch an order that already
+     * has a dispatch record.
+     */
+    boolean existsByOrderId(Long orderId);
 }
