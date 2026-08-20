@@ -10,7 +10,9 @@ import com.project.kitchen_dispatch.service.interfac.IEtaTrainingDataService;
 import com.project.kitchen_dispatch.service.interfac.IOrderService;
 import com.project.kitchen_dispatch.service.interfac.IRiderService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -104,18 +106,59 @@ public class DispatchController {
 
     /*
      * ============================================================
-     * ETA TRAINING DATA
+     * ETA TRAINING DATA - JSON
      * ============================================================
-     *
-     * Returns completed deliveries converted into
-     * ML training records.
      */
     @GetMapping("/eta/training-data")
     public ResponseEntity<List<EtaTrainingData>>
     getEtaTrainingData() {
 
         return ResponseEntity.ok(
-                etaTrainingDataService.getTrainingData()
+                etaTrainingDataService
+                        .getTrainingData()
+        );
+    }
+
+
+    /*
+     * ============================================================
+     * ETA TRAINING DATA - CSV
+     * ============================================================
+     *
+     * This endpoint will be used later by the Python ML
+     * training pipeline.
+     */
+    @GetMapping(
+            value = "/eta/training-data/csv",
+            produces = "text/csv"
+    )
+    public ResponseEntity<String>
+    getEtaTrainingDataCsv() {
+
+        String csv =
+                etaTrainingDataService
+                        .getTrainingDataCsv();
+
+
+        HttpHeaders headers =
+                new HttpHeaders();
+
+        headers.setContentType(
+                MediaType.parseMediaType(
+                        "text/csv"
+                )
+        );
+
+        headers.set(
+                HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=eta_training_data.csv"
+        );
+
+
+        return new ResponseEntity<>(
+                csv,
+                headers,
+                HttpStatus.OK
         );
     }
 
@@ -131,26 +174,32 @@ public class DispatchController {
                 );
 
         Rider rider =
-                riderService.findAssignedRiderForOrder(
-                        orderId
-                );
+                riderService
+                        .findAssignedRiderForOrder(
+                                orderId
+                        );
 
         Map<String, Object> eta =
-                dispatchDecisionService.calculateETA(
-                        order,
-                        rider
-                );
+                dispatchDecisionService
+                        .calculateETA(
+                                order,
+                                rider
+                        );
 
         /*
          * Persist the newly calculated ETA.
          */
         orderService.saveOrder(order);
 
-        return ResponseEntity.ok(eta);
+        return ResponseEntity.ok(
+                eta
+        );
     }
 
 
-    @GetMapping("/decision/{orderId}/{riderId}")
+    @GetMapping(
+            "/decision/{orderId}/{riderId}"
+    )
     public ResponseEntity<Map<String, Object>>
     calculateDispatchDecision(
             @PathVariable Long orderId,

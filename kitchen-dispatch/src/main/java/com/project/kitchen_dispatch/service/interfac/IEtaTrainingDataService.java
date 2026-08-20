@@ -7,4 +7,6 @@ import java.util.List;
 public interface IEtaTrainingDataService {
 
     List<EtaTrainingData> getTrainingData();
+
+    String getTrainingDataCsv();
 }
