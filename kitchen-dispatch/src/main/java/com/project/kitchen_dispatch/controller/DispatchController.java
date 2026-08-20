@@ -1,10 +1,12 @@
 package com.project.kitchen_dispatch.controller;
 
 import com.project.kitchen_dispatch.model.Dispatch;
+import com.project.kitchen_dispatch.model.EtaTrainingData;
 import com.project.kitchen_dispatch.model.Order;
 import com.project.kitchen_dispatch.model.Rider;
 import com.project.kitchen_dispatch.service.interfac.IDispatchDecisionService;
 import com.project.kitchen_dispatch.service.interfac.IDispatchService;
+import com.project.kitchen_dispatch.service.interfac.IEtaTrainingDataService;
 import com.project.kitchen_dispatch.service.interfac.IOrderService;
 import com.project.kitchen_dispatch.service.interfac.IRiderService;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -27,6 +30,9 @@ public class DispatchController {
     private final IOrderService orderService;
 
     private final IRiderService riderService;
+
+    private final IEtaTrainingDataService
+            etaTrainingDataService;
 
 
     @PostMapping
@@ -92,6 +98,24 @@ public class DispatchController {
 
         return ResponseEntity.ok(
                 dispatchService.getETAAnalytics()
+        );
+    }
+
+
+    /*
+     * ============================================================
+     * ETA TRAINING DATA
+     * ============================================================
+     *
+     * Returns completed deliveries converted into
+     * ML training records.
+     */
+    @GetMapping("/eta/training-data")
+    public ResponseEntity<List<EtaTrainingData>>
+    getEtaTrainingData() {
+
+        return ResponseEntity.ok(
+                etaTrainingDataService.getTrainingData()
         );
     }
 
