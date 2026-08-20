@@ -18,21 +18,11 @@ import java.util.Map;
 public class DispatchDecisionService
         implements IDispatchDecisionService {
 
-    /*
-     * Average rider speed used for the current
-     * deterministic ETA calculation.
-     *
-     * Later this can be replaced by an ML model.
-     */
     private static final double AVERAGE_RIDER_SPEED_KMH = 30.0;
 
-    private final IPreparationTimeService preparationTimeService;
+    private final IPreparationTimeService
+            preparationTimeService;
 
-    /*
-     * ============================================================
-     * DISPATCH DECISION
-     * ============================================================
-     */
 
     @Override
     public Map<String, Object> calculateDispatchDecision(
@@ -47,7 +37,9 @@ public class DispatchDecisionService
 
         LocalDateTime foodReadyTime =
                 order.getCreatedAt()
-                        .plusMinutes(preparationTime);
+                        .plusMinutes(
+                                preparationTime
+                        );
 
         double riderToKitchenDistance =
                 calculateDistance(
@@ -148,11 +140,6 @@ public class DispatchDecisionService
         return result;
     }
 
-    /*
-     * ============================================================
-     * FOOD READY TIME
-     * ============================================================
-     */
 
     @Override
     public LocalDateTime calculateFoodReadyTime(
@@ -160,18 +147,12 @@ public class DispatchDecisionService
 
         validateOrder(order);
 
-        Integer preparationTime =
-                getPreparationTime(order);
-
         return order.getCreatedAt()
-                .plusMinutes(preparationTime);
+                .plusMinutes(
+                        getPreparationTime(order)
+                );
     }
 
-    /*
-     * ============================================================
-     * RIDER → KITCHEN DISTANCE
-     * ============================================================
-     */
 
     @Override
     public double calculateTravelDistance(
@@ -192,33 +173,20 @@ public class DispatchDecisionService
         );
     }
 
-    /*
-     * ============================================================
-     * RIDER → KITCHEN TRAVEL TIME
-     * ============================================================
-     */
 
     @Override
     public int calculateTravelTimeMinutes(
             Order order,
             Rider rider) {
 
-        double distance =
+        return calculateTravelTimeMinutes(
                 calculateTravelDistance(
                         order,
                         rider
-                );
-
-        return calculateTravelTimeMinutes(
-                distance
+                )
         );
     }
 
-    /*
-     * ============================================================
-     * OPTIMAL DISPATCH TIME
-     * ============================================================
-     */
 
     @Override
     public LocalDateTime calculateOptimalDispatchTime(
@@ -228,12 +196,8 @@ public class DispatchDecisionService
         validateOrder(order);
         validateRider(rider);
 
-        Integer preparationTime =
-                getPreparationTime(order);
-
         LocalDateTime foodReadyTime =
-                order.getCreatedAt()
-                        .plusMinutes(preparationTime);
+                calculateFoodReadyTime(order);
 
         int travelTime =
                 calculateTravelTimeMinutes(
@@ -241,7 +205,7 @@ public class DispatchDecisionService
                         rider
                 );
 
-        LocalDateTime optimalDispatchTime =
+        LocalDateTime optimal =
                 foodReadyTime.minusMinutes(
                         travelTime
                 );
@@ -249,34 +213,12 @@ public class DispatchDecisionService
         LocalDateTime now =
                 LocalDateTime.now();
 
-        if (optimalDispatchTime.isBefore(now)) {
-            return now;
-        }
-
-        return optimalDispatchTime;
+        return optimal.isBefore(now)
+                ? now
+                : optimal;
     }
 
-    /*
-     * ============================================================
-     * CUSTOMER ETA
-     * ============================================================
-     *
-     * Flow:
-     *
-     * Kitchen
-     *    ↓
-     * Rider pickup
-     *    ↓
-     * Customer
-     *
-     * ETA calculation:
-     *
-     * Expected Pickup Time
-     * +
-     * Kitchen → Customer Travel Time
-     * =
-     * Estimated Delivery Time
-     */
+
     @Override
     public Map<String, Object> calculateETA(
             Order order,
@@ -289,12 +231,10 @@ public class DispatchDecisionService
                 LocalDateTime.now();
 
         /*
-         * --------------------------------------------------------
-         * CASE 1: ORDER ALREADY DELIVERED
-         * --------------------------------------------------------
+         * Delivered order.
          */
-
-        if ("DELIVERED".equals(order.getStatus())) {
+        if ("DELIVERED".equals(
+                order.getStatus())) {
 
             Map<String, Object> result =
                     new LinkedHashMap<>();
@@ -332,11 +272,6 @@ public class DispatchDecisionService
             return result;
         }
 
-        /*
-         * --------------------------------------------------------
-         * CUSTOMER LOCATION VALIDATION
-         * --------------------------------------------------------
-         */
 
         if (order.getDeliveryLatitude() == null ||
                 order.getDeliveryLongitude() == null) {
@@ -357,11 +292,6 @@ public class DispatchDecisionService
             );
         }
 
-        /*
-         * --------------------------------------------------------
-         * KITCHEN → CUSTOMER DISTANCE
-         * --------------------------------------------------------
-         */
 
         double kitchenToCustomerDistance =
                 calculateDistance(
@@ -376,37 +306,28 @@ public class DispatchDecisionService
                         kitchenToCustomerDistance
                 );
 
-        /*
-         * --------------------------------------------------------
-         * EXPECTED PICKUP TIME
-         * --------------------------------------------------------
-         */
 
         LocalDateTime expectedPickupTime;
 
         String etaBasis;
 
+
         /*
-         * If rider already picked up the food,
-         * delivery starts from NOW.
+         * Food already picked up.
          */
-        if ("PICKED_UP".equals(order.getStatus())) {
+        if ("PICKED_UP".equals(
+                order.getStatus())) {
 
             expectedPickupTime = now;
 
-            etaBasis = "RIDER_ALREADY_PICKED_UP";
+            etaBasis =
+                    "RIDER_ALREADY_PICKED_UP";
 
         } else {
 
-            /*
-             * Food ready time.
-             */
             LocalDateTime foodReadyTime =
                     calculateFoodReadyTime(order);
 
-            /*
-             * Rider → Kitchen travel time.
-             */
             double riderToKitchenDistance =
                     calculateDistance(
                             rider.getLatitude(),
@@ -420,24 +341,17 @@ public class DispatchDecisionService
                             riderToKitchenDistance
                     );
 
-            /*
-             * Time when rider is expected to
-             * arrive at the kitchen.
-             */
             LocalDateTime riderArrivalAtKitchen =
                     now.plusMinutes(
                             riderToKitchenTravelTime
                     );
 
             /*
-             * Rider can only pick up when BOTH:
+             * Pickup happens when BOTH:
              *
-             * 1. Food is ready
-             * 2. Rider has reached kitchen
-             *
-             * Therefore:
-             *
-             * MAX(foodReadyTime, riderArrivalTime)
+             * food is ready
+             * AND
+             * rider has reached kitchen.
              */
             expectedPickupTime =
                     foodReadyTime.isAfter(
@@ -450,22 +364,12 @@ public class DispatchDecisionService
                     "FOOD_READY_AND_RIDER_TRAVEL";
         }
 
-        /*
-         * --------------------------------------------------------
-         * ESTIMATED DELIVERY TIME
-         * --------------------------------------------------------
-         */
 
         LocalDateTime estimatedDeliveryTime =
                 expectedPickupTime.plusMinutes(
                         kitchenToCustomerTravelTime
                 );
 
-        /*
-         * --------------------------------------------------------
-         * MINUTES REMAINING
-         * --------------------------------------------------------
-         */
 
         long minutesRemaining =
                 Duration.between(
@@ -473,30 +377,24 @@ public class DispatchDecisionService
                         estimatedDeliveryTime
                 ).toMinutes();
 
-        /*
-         * ETA should never show a negative value.
-         */
         minutesRemaining =
                 Math.max(
                         0,
                         minutesRemaining
                 );
 
-        /*
-         * --------------------------------------------------------
-         * SAVE ETA TO ORDER
-         * --------------------------------------------------------
-         */
 
+        /*
+         * Update the current Order object.
+         *
+         * DispatchService persists this during dispatch.
+         * The customer ETA endpoint explicitly saves the
+         * order through OrderService.
+         */
         order.setEstimatedDeliveryTime(
                 estimatedDeliveryTime
         );
 
-        /*
-         * --------------------------------------------------------
-         * RESPONSE
-         * --------------------------------------------------------
-         */
 
         Map<String, Object> result =
                 new LinkedHashMap<>();
@@ -568,11 +466,6 @@ public class DispatchDecisionService
         return result;
     }
 
-    /*
-     * ============================================================
-     * PREPARATION TIME
-     * ============================================================
-     */
 
     private Integer getPreparationTime(
             Order order) {
@@ -598,11 +491,6 @@ public class DispatchDecisionService
         return preparationTime;
     }
 
-    /*
-     * ============================================================
-     * TRAVEL TIME
-     * ============================================================
-     */
 
     private int calculateTravelTimeMinutes(
             double distanceKm) {
@@ -611,23 +499,18 @@ public class DispatchDecisionService
             return 0;
         }
 
-        double travelTimeHours =
+        double hours =
                 distanceKm /
                         AVERAGE_RIDER_SPEED_KMH;
 
         return Math.max(
                 1,
                 (int) Math.ceil(
-                        travelTimeHours * 60
+                        hours * 60
                 )
         );
     }
 
-    /*
-     * ============================================================
-     * HAVERSINE DISTANCE
-     * ============================================================
-     */
 
     private double calculateDistance(
             double lat1,
@@ -652,9 +535,7 @@ public class DispatchDecisionService
                 Math.sin(latDistance / 2)
                         *
                         Math.sin(latDistance / 2)
-
                         +
-
                         Math.cos(
                                 Math.toRadians(lat1)
                         )
@@ -662,16 +543,10 @@ public class DispatchDecisionService
                                 Math.cos(
                                         Math.toRadians(lat2)
                                 )
-
                                 *
-
-                                Math.sin(
-                                        lonDistance / 2
-                                )
+                                Math.sin(lonDistance / 2)
                                 *
-                                Math.sin(
-                                        lonDistance / 2
-                                );
+                                Math.sin(lonDistance / 2);
 
         double c =
                 2 *
@@ -683,38 +558,29 @@ public class DispatchDecisionService
         return EARTH_RADIUS_KM * c;
     }
 
-    /*
-     * ============================================================
-     * ORDER VALIDATION
-     * ============================================================
-     */
 
     private void validateOrder(
             Order order) {
 
         if (order == null) {
-
             throw new RuntimeException(
                     "Order is required"
             );
         }
 
         if (order.getId() == null) {
-
             throw new RuntimeException(
                     "Order id is required"
             );
         }
 
         if (order.getCreatedAt() == null) {
-
             throw new RuntimeException(
                     "Order creation time is required"
             );
         }
 
         if (order.getKitchen() == null) {
-
             throw new RuntimeException(
                     "Order kitchen is required"
             );
@@ -729,24 +595,17 @@ public class DispatchDecisionService
         }
     }
 
-    /*
-     * ============================================================
-     * RIDER VALIDATION
-     * ============================================================
-     */
 
     private void validateRider(
             Rider rider) {
 
         if (rider == null) {
-
             throw new RuntimeException(
                     "Rider is required"
             );
         }
 
         if (rider.getId() == null) {
-
             throw new RuntimeException(
                     "Rider id is required"
             );
@@ -768,34 +627,26 @@ public class DispatchDecisionService
             );
         }
 
-        if (rider.getLatitude() == null ||
-                rider.getLongitude() == null) {
-
-            throw new RuntimeException(
-                    "Rider location is required"
-            );
-        }
+        validateRiderLocation(rider);
     }
 
+
     /*
-     * ETA can still be calculated for a rider
-     * that has become unavailable after assignment.
+     * ETA may be requested after assignment.
      *
-     * Therefore ETA validation does NOT require
-     * available = true.
+     * Assigned riders are intentionally unavailable,
+     * so we MUST NOT require available == true here.
      */
     private void validateRiderForETA(
             Rider rider) {
 
         if (rider == null) {
-
             throw new RuntimeException(
                     "Rider is required"
             );
         }
 
         if (rider.getId() == null) {
-
             throw new RuntimeException(
                     "Rider id is required"
             );
@@ -809,6 +660,13 @@ public class DispatchDecisionService
             );
         }
 
+        validateRiderLocation(rider);
+    }
+
+
+    private void validateRiderLocation(
+            Rider rider) {
+
         if (rider.getLatitude() == null ||
                 rider.getLongitude() == null) {
 
@@ -818,11 +676,6 @@ public class DispatchDecisionService
         }
     }
 
-    /*
-     * ============================================================
-     * ROUNDING
-     * ============================================================
-     */
 
     private double round(
             double value) {

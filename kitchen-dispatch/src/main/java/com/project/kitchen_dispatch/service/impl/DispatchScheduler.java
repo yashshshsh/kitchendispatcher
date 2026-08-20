@@ -11,7 +11,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -32,12 +31,14 @@ public class DispatchScheduler {
     private final IRiderService
             riderService;
 
+
     @Scheduled(fixedDelay = 30000)
-    @Transactional
     public void processPendingOrders() {
 
         List<Order> pendingOrders =
-                orderRepository.findByStatus("PLACED");
+                orderRepository.findByStatus(
+                        "PLACED"
+                );
 
         if (pendingOrders.isEmpty()) {
             return;
@@ -56,6 +57,10 @@ public class DispatchScheduler {
 
             } catch (Exception e) {
 
+                /*
+                 * One failed order must not stop
+                 * the remaining orders.
+                 */
                 log.error(
                         "Failed to process dispatch for order {}",
                         order.getId(),
@@ -65,11 +70,23 @@ public class DispatchScheduler {
         }
     }
 
-    private void processOrder(Order order) {
 
-        if (order == null) {
+    private void processOrder(
+            Order order) {
+
+        if (order == null ||
+                order.getId() == null) {
+
             return;
         }
+
+
+        if (!"PLACED".equals(
+                order.getStatus())) {
+
+            return;
+        }
+
 
         if (order.getKitchen() == null) {
 
@@ -80,6 +97,7 @@ public class DispatchScheduler {
 
             return;
         }
+
 
         if (order.getKitchen().getLatitude() == null ||
                 order.getKitchen().getLongitude() == null) {
@@ -92,6 +110,7 @@ public class DispatchScheduler {
             return;
         }
 
+
         if (order.getDeliveryLatitude() == null ||
                 order.getDeliveryLongitude() == null) {
 
@@ -103,13 +122,11 @@ public class DispatchScheduler {
             return;
         }
 
+
         Rider rider;
 
         try {
 
-            /*
-             * Destination-aware rider selection.
-             */
             rider =
                     riderService.findBestRider(
                             order
@@ -126,10 +143,7 @@ public class DispatchScheduler {
             return;
         }
 
-        /*
-         * Calculate optimal dispatch time for
-         * the selected rider.
-         */
+
         LocalDateTime recommendedDispatchTime =
                 dispatchDecisionService
                         .calculateOptimalDispatchTime(
@@ -140,10 +154,10 @@ public class DispatchScheduler {
         LocalDateTime now =
                 LocalDateTime.now();
 
-        /*
-         * Food isn't ready soon enough.
-         */
-        if (recommendedDispatchTime.isAfter(now)) {
+
+        if (recommendedDispatchTime.isAfter(
+                now
+        )) {
 
             log.info(
                     "Order {} waiting until {}. Selected rider: {}",
@@ -155,9 +169,7 @@ public class DispatchScheduler {
             return;
         }
 
-        /*
-         * Dispatch time has arrived.
-         */
+
         Dispatch dispatch =
                 createDispatch(
                         order,
@@ -165,10 +177,6 @@ public class DispatchScheduler {
                 );
 
         if (dispatch != null) {
-
-            order.setStatus("ASSIGNED");
-
-            orderRepository.save(order);
 
             log.info(
                     "Order {} dispatched to rider {} at {}",
@@ -178,6 +186,7 @@ public class DispatchScheduler {
             );
         }
     }
+
 
     private Dispatch createDispatch(
             Order order,
@@ -191,9 +200,10 @@ public class DispatchScheduler {
                             .rider(rider)
                             .build();
 
-            return dispatchService.createDispatch(
-                    dispatch
-            );
+            return dispatchService
+                    .createDispatch(
+                            dispatch
+                    );
 
         } catch (RuntimeException e) {
 

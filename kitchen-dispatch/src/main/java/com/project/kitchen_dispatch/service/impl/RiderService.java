@@ -22,14 +22,8 @@ public class RiderService implements IRiderService {
 
     private static final double AVERAGE_RIDER_SPEED_KMH = 30.0;
 
-    /*
-     * Weight used for rider selection.
-     */
     private static final double RIDER_TO_KITCHEN_WEIGHT = 0.70;
 
-    /*
-     * Total travel time weight.
-     */
     private static final double TOTAL_TRAVEL_TIME_WEIGHT = 0.30;
 
     private final RiderRepository riderRepository;
@@ -37,21 +31,36 @@ public class RiderService implements IRiderService {
     private final DispatchRepository dispatchRepository;
 
 
-    /*
-     * ============================================================
-     * CREATE RIDER
-     * ============================================================
-     */
-
     @Override
     public Rider createRider(Rider rider) {
 
         if (rider == null) {
-
             throw new RuntimeException(
                     "Rider is required"
             );
         }
+
+        if (rider.getName() == null ||
+                rider.getName().isBlank()) {
+
+            throw new RuntimeException(
+                    "Rider name is required"
+            );
+        }
+
+        if (rider.getPhone() == null ||
+                rider.getPhone().isBlank()) {
+
+            throw new RuntimeException(
+                    "Rider phone is required"
+            );
+        }
+
+        validateCoordinates(
+                rider.getLatitude(),
+                rider.getLongitude(),
+                "Rider"
+        );
 
         if (rider.getAvailable() == null) {
             rider.setAvailable(true);
@@ -65,17 +74,10 @@ public class RiderService implements IRiderService {
     }
 
 
-    /*
-     * ============================================================
-     * GET RIDER BY ID
-     * ============================================================
-     */
-
     @Override
     public Rider getRiderById(Long id) {
 
         if (id == null) {
-
             throw new RuntimeException(
                     "Rider id is required"
             );
@@ -85,51 +87,41 @@ public class RiderService implements IRiderService {
                 .findById(id)
                 .orElseThrow(() ->
                         new RuntimeException(
-                                "Rider not found with id: "
-                                        + id
+                                "Rider not found with id: " + id
                         )
                 );
     }
 
 
-    /*
-     * ============================================================
-     * GET AVAILABLE RIDERS
-     * ============================================================
-     */
-
     @Override
     public List<Rider> getAvailableRiders() {
 
         return riderRepository
-                .findByAvailableTrueAndActiveTrue();
+                .findByAvailableTrueAndActiveTrue()
+                .stream()
+                .filter(rider ->
+                        rider.getLatitude() != null &&
+                                rider.getLongitude() != null
+                )
+                .toList();
     }
 
-
-    /*
-     * ============================================================
-     * FIND NEAREST RIDER
-     * ============================================================
-     */
 
     @Override
     public Rider findNearestRider(
             Double kitchenLatitude,
             Double kitchenLongitude) {
 
-        if (kitchenLatitude == null ||
-                kitchenLongitude == null) {
-
-            throw new RuntimeException(
-                    "Kitchen location is required"
-            );
-        }
+        validateCoordinates(
+                kitchenLatitude,
+                kitchenLongitude,
+                "Kitchen"
+        );
 
         List<Rider> riders =
-                getValidAvailableRiders();
+                getAvailableRiders();
 
         if (riders.isEmpty()) {
-
             throw new RuntimeException(
                     "No available riders found"
             );
@@ -155,25 +147,41 @@ public class RiderService implements IRiderService {
     }
 
 
-    /*
-     * ============================================================
-     * FIND BEST RIDER
-     * ============================================================
-     */
-
     @Override
-    public Rider findBestRider(
-            Order order) {
+    @Transactional
+    public Rider findBestRider(Order order) {
 
         validateOrder(order);
 
+        /*
+         * IMPORTANT:
+         *
+         * Actual dispatch selection uses the
+         * pessimistic-lock query.
+         */
         List<Rider> riders =
-                getValidAvailableRiders();
+                riderRepository
+                        .findAvailableRidersForDispatch();
 
         if (riders.isEmpty()) {
-
             throw new RuntimeException(
                     "No available riders found"
+            );
+        }
+
+        /*
+         * Extra validation.
+         */
+        riders = riders.stream()
+                .filter(rider ->
+                        rider.getLatitude() != null &&
+                                rider.getLongitude() != null
+                )
+                .toList();
+
+        if (riders.isEmpty()) {
+            throw new RuntimeException(
+                    "No available riders with valid location found"
             );
         }
 
@@ -221,12 +229,6 @@ public class RiderService implements IRiderService {
     }
 
 
-    /*
-     * ============================================================
-     * EVALUATE RIDERS
-     * ============================================================
-     */
-
     @Override
     public Map<String, Object> evaluateRiders(
             Order order) {
@@ -234,10 +236,9 @@ public class RiderService implements IRiderService {
         validateOrder(order);
 
         List<Rider> riders =
-                getValidAvailableRiders();
+                getAvailableRiders();
 
         if (riders.isEmpty()) {
-
             throw new RuntimeException(
                     "No available riders found"
             );
@@ -269,22 +270,19 @@ public class RiderService implements IRiderService {
 
         List<Map<String, Object>> evaluations =
                 riders.stream()
-                        .map(
-                                rider ->
-                                        evaluateRider(
-                                                order,
-                                                rider,
-                                                maxDistance,
-                                                maxTravelTime
-                                        )
+                        .map(rider ->
+                                evaluateRider(
+                                        order,
+                                        rider,
+                                        maxDistance,
+                                        maxTravelTime
+                                )
                         )
                         .sorted(
                                 Comparator.comparingDouble(
                                         item ->
                                                 ((Number)
-                                                        item.get(
-                                                                "score"
-                                                        )
+                                                        item.get("score")
                                                 ).doubleValue()
                                 )
                         )
@@ -325,12 +323,6 @@ public class RiderService implements IRiderService {
     }
 
 
-    /*
-     * ============================================================
-     * MARK RIDER UNAVAILABLE
-     * ============================================================
-     */
-
     @Override
     @Transactional
     public Rider markRiderUnavailable(
@@ -352,12 +344,6 @@ public class RiderService implements IRiderService {
         return riderRepository.save(rider);
     }
 
-
-    /*
-     * ============================================================
-     * MARK RIDER AVAILABLE
-     * ============================================================
-     */
 
     @Override
     @Transactional
@@ -381,56 +367,33 @@ public class RiderService implements IRiderService {
     }
 
 
-    /*
-     * ============================================================
-     * FIND ASSIGNED RIDER FOR ORDER
-     * ============================================================
-     *
-     * This is used by:
-     *
-     * GET /api/dispatches/eta/{orderId}
-     *
-     * DispatchRepository already provides:
-     *
-     * findByOrderId(Long orderId)
-     *
-     * so we use the existing relationship.
-     */
-
     @Override
+    @Transactional(readOnly = true)
     public Rider findAssignedRiderForOrder(
             Long orderId) {
 
         if (orderId == null) {
-
             throw new RuntimeException(
                     "Order id is required"
             );
         }
 
         List<Dispatch> dispatches =
-                dispatchRepository
-                        .findByOrderId(orderId);
+                dispatchRepository.findByOrderId(
+                        orderId
+                );
 
-        if (dispatches == null ||
-                dispatches.isEmpty()) {
-
+        if (dispatches.isEmpty()) {
             throw new RuntimeException(
                     "No dispatch found for order: "
                             + orderId
             );
         }
 
-        /*
-         * Find the latest dispatch record.
-         *
-         * This protects us if the same order ever
-         * gets multiple dispatch records.
-         */
-        Dispatch latestDispatch =
+        Dispatch dispatch =
                 dispatches.stream()
-                        .filter(dispatch ->
-                                dispatch.getRider() != null
+                        .filter(d ->
+                                d.getRider() != null
                         )
                         .max(
                                 Comparator.comparing(
@@ -444,23 +407,9 @@ public class RiderService implements IRiderService {
                                 )
                         );
 
-        if (latestDispatch.getRider() == null) {
-
-            throw new RuntimeException(
-                    "No rider assigned to order: "
-                            + orderId
-            );
-        }
-
-        return latestDispatch.getRider();
+        return dispatch.getRider();
     }
 
-
-    /*
-     * ============================================================
-     * EVALUATE SINGLE RIDER
-     * ============================================================
-     */
 
     private Map<String, Object> evaluateRider(
             Order order,
@@ -522,44 +471,32 @@ public class RiderService implements IRiderService {
 
         result.put(
                 "riderToKitchenDistanceKm",
-                round(
-                        riderToKitchenDistance
-                )
+                round(riderToKitchenDistance)
         );
 
         result.put(
                 "kitchenToCustomerDistanceKm",
-                round(
-                        kitchenToCustomerDistance
-                )
+                round(kitchenToCustomerDistance)
         );
 
         result.put(
                 "totalDistanceKm",
-                round(
-                        totalDistance
-                )
+                round(totalDistance)
         );
 
         result.put(
                 "riderToKitchenTimeMinutes",
-                round(
-                        riderToKitchenTime
-                )
+                round(riderToKitchenTime)
         );
 
         result.put(
                 "kitchenToCustomerTimeMinutes",
-                round(
-                        kitchenToCustomerTime
-                )
+                round(kitchenToCustomerTime)
         );
 
         result.put(
                 "totalTravelTimeMinutes",
-                round(
-                        totalTravelTime
-                )
+                round(totalTravelTime)
         );
 
         result.put(
@@ -571,33 +508,21 @@ public class RiderService implements IRiderService {
     }
 
 
-    /*
-     * ============================================================
-     * CALCULATE SCORE
-     * ============================================================
-     */
-
     private double calculateScore(
             Order order,
             Rider rider,
             double maxDistance,
             double maxTravelTime) {
 
-        double riderToKitchenDistance =
+        return calculateScore(
                 calculateRiderToKitchenDistance(
                         order,
                         rider
-                );
-
-        double totalTravelTime =
+                ),
                 calculateTotalTravelTime(
                         order,
                         rider
-                );
-
-        return calculateScore(
-                riderToKitchenDistance,
-                totalTravelTime,
+                ),
                 maxDistance,
                 maxTravelTime
         );
@@ -613,35 +538,25 @@ public class RiderService implements IRiderService {
         double normalizedDistance =
                 maxDistance == 0
                         ? 0
-                        : riderToKitchenDistance
-                        / maxDistance;
+                        : riderToKitchenDistance /
+                        maxDistance;
 
         double normalizedTravelTime =
                 maxTravelTime == 0
                         ? 0
-                        : totalTravelTime
-                        / maxTravelTime;
+                        : totalTravelTime /
+                        maxTravelTime;
 
         return
-                (
-                        RIDER_TO_KITCHEN_WEIGHT
-                                *
-                                normalizedDistance
-                )
+                RIDER_TO_KITCHEN_WEIGHT
+                        *
+                        normalizedDistance
                         +
-                        (
-                                TOTAL_TRAVEL_TIME_WEIGHT
-                                        *
-                                        normalizedTravelTime
-                        );
+                        TOTAL_TRAVEL_TIME_WEIGHT
+                                *
+                                normalizedTravelTime;
     }
 
-
-    /*
-     * ============================================================
-     * RIDER → KITCHEN DISTANCE
-     * ============================================================
-     */
 
     private double calculateRiderToKitchenDistance(
             Order order,
@@ -659,12 +574,6 @@ public class RiderService implements IRiderService {
     }
 
 
-    /*
-     * ============================================================
-     * KITCHEN → CUSTOMER DISTANCE
-     * ============================================================
-     */
-
     private double calculateKitchenToCustomerDistance(
             Order order) {
 
@@ -679,12 +588,6 @@ public class RiderService implements IRiderService {
         );
     }
 
-
-    /*
-     * ============================================================
-     * TOTAL TRAVEL TIME
-     * ============================================================
-     */
 
     private double calculateTotalTravelTime(
             Order order,
@@ -709,69 +612,39 @@ public class RiderService implements IRiderService {
     }
 
 
-    /*
-     * ============================================================
-     * TRAVEL TIME
-     * ============================================================
-     */
-
     private double calculateTravelTime(
             double distanceKm) {
 
-        double travelTimeHours =
+        if (distanceKm <= 0) {
+            return 0;
+        }
+
+        return (
                 distanceKm /
-                        AVERAGE_RIDER_SPEED_KMH;
-
-        return travelTimeHours * 60;
+                        AVERAGE_RIDER_SPEED_KMH
+        ) * 60;
     }
 
 
-    /*
-     * ============================================================
-     * VALID AVAILABLE RIDERS
-     * ============================================================
-     */
-
-    private List<Rider> getValidAvailableRiders() {
-
-        return riderRepository
-                .findByAvailableTrueAndActiveTrue()
-                .stream()
-                .filter(
-                        rider ->
-                                rider.getLatitude() != null
-                                        &&
-                                        rider.getLongitude() != null
-                )
-                .toList();
-    }
-
-
-    /*
-     * ============================================================
-     * VALIDATE ORDER
-     * ============================================================
-     */
-
-    private void validateOrder(
-            Order order) {
+    private void validateOrder(Order order) {
 
         if (order == null) {
-
             throw new RuntimeException(
                     "Order is required"
             );
         }
 
         if (order.getKitchen() == null) {
-
             throw new RuntimeException(
                     "Order kitchen is required"
             );
         }
 
-        if (order.getKitchen().getLatitude() == null ||
-                order.getKitchen().getLongitude() == null) {
+        Kitchen kitchen =
+                order.getKitchen();
+
+        if (kitchen.getLatitude() == null ||
+                kitchen.getLongitude() == null) {
 
             throw new RuntimeException(
                     "Kitchen location is required"
@@ -788,11 +661,36 @@ public class RiderService implements IRiderService {
     }
 
 
-    /*
-     * ============================================================
-     * HAVERSINE DISTANCE
-     * ============================================================
-     */
+    private void validateCoordinates(
+            Double latitude,
+            Double longitude,
+            String entity) {
+
+        if (latitude == null ||
+                longitude == null) {
+
+            throw new RuntimeException(
+                    entity + " location is required"
+            );
+        }
+
+        if (latitude < -90 ||
+                latitude > 90) {
+
+            throw new RuntimeException(
+                    entity + " latitude must be between -90 and 90"
+            );
+        }
+
+        if (longitude < -180 ||
+                longitude > 180) {
+
+            throw new RuntimeException(
+                    entity + " longitude must be between -180 and 180"
+            );
+        }
+    }
+
 
     private double calculateDistance(
             double lat1,
@@ -814,16 +712,10 @@ public class RiderService implements IRiderService {
                 );
 
         double a =
-                Math.sin(
-                        latDistance / 2
-                )
+                Math.sin(latDistance / 2)
                         *
-                        Math.sin(
-                                latDistance / 2
-                        )
-
+                        Math.sin(latDistance / 2)
                         +
-
                         Math.cos(
                                 Math.toRadians(lat1)
                         )
@@ -831,16 +723,10 @@ public class RiderService implements IRiderService {
                                 Math.cos(
                                         Math.toRadians(lat2)
                                 )
-
                                 *
-
-                                Math.sin(
-                                        lonDistance / 2
-                                )
+                                Math.sin(lonDistance / 2)
                                 *
-                                Math.sin(
-                                        lonDistance / 2
-                                );
+                                Math.sin(lonDistance / 2);
 
         double c =
                 2 *
@@ -853,14 +739,7 @@ public class RiderService implements IRiderService {
     }
 
 
-    /*
-     * ============================================================
-     * ROUND
-     * ============================================================
-     */
-
-    private double round(
-            double value) {
+    private double round(double value) {
 
         return Math.round(
                 value * 100.0

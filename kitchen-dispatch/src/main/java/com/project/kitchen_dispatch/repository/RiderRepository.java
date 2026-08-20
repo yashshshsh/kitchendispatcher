@@ -8,18 +8,32 @@ import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 
-public interface RiderRepository extends JpaRepository<Rider, Long> {
+public interface RiderRepository
+        extends JpaRepository<Rider, Long> {
 
-    // Normal query - used by GET /api/riders/available
+    /*
+     * Normal read-only query.
+     *
+     * Used by:
+     * GET /api/riders/available
+     */
     List<Rider> findByAvailableTrueAndActiveTrue();
 
-    // Locked query - used during actual dispatch selection
+
+    /*
+     * Locked query used during actual dispatch selection.
+     *
+     * Pessimistic locking prevents two dispatch operations
+     * from selecting the same available rider at the same time.
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             SELECT r
             FROM Rider r
             WHERE r.available = true
               AND r.active = true
+              AND r.latitude IS NOT NULL
+              AND r.longitude IS NOT NULL
             """)
     List<Rider> findAvailableRidersForDispatch();
 }

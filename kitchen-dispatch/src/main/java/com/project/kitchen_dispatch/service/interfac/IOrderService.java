@@ -7,4 +7,6 @@ public interface IOrderService {
     Order createOrder(Order order);
 
     Order getOrderById(Long id);
+
+    Order saveOrder(Order order);
 }

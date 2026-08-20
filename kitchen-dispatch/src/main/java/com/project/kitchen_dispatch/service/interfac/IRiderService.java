@@ -27,8 +27,5 @@ public interface IRiderService {
 
     Rider markRiderAvailable(Long id);
 
-    /*
-     * Find the rider currently assigned to an order.
-     */
     Rider findAssignedRiderForOrder(Long orderId);
 }

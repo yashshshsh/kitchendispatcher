@@ -11,6 +11,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+
 @Service
 @RequiredArgsConstructor
 public class OrderService
@@ -25,16 +27,40 @@ public class OrderService
     private final IPreparationTimeService
             preparationTimeService;
 
+
     @Override
     @Transactional
     public Order createOrder(Order order) {
 
         if (order == null) {
-
             throw new RuntimeException(
                     "Order is required"
             );
         }
+
+        if (isBlank(order.getCustomerName())) {
+            throw new RuntimeException(
+                    "Customer name is required"
+            );
+        }
+
+        if (isBlank(order.getCustomerPhone())) {
+            throw new RuntimeException(
+                    "Customer phone is required"
+            );
+        }
+
+        if (isBlank(order.getDeliveryAddress())) {
+            throw new RuntimeException(
+                    "Delivery address is required"
+            );
+        }
+
+        validateCoordinates(
+                order.getDeliveryLatitude(),
+                order.getDeliveryLongitude(),
+                "Delivery"
+        );
 
         if (order.getKitchen() == null ||
                 order.getKitchen().getId() == null) {
@@ -44,9 +70,6 @@ public class OrderService
             );
         }
 
-        /*
-         * Load the actual Kitchen from the database.
-         */
         Kitchen kitchen =
                 kitchenService.getKitchenById(
                         order.getKitchen().getId()
@@ -60,41 +83,23 @@ public class OrderService
             );
         }
 
-        if (kitchen.getLatitude() == null ||
-                kitchen.getLongitude() == null) {
+        validateCoordinates(
+                kitchen.getLatitude(),
+                kitchen.getLongitude(),
+                "Kitchen"
+        );
 
-            throw new RuntimeException(
-                    "Kitchen location is not available"
-            );
-        }
-
-        /*
-         * Attach the managed Kitchen entity.
-         */
         order.setKitchen(kitchen);
 
-        /*
-         * New orders always begin as PLACED.
-         */
         order.setStatus("PLACED");
 
-        /*
-         * Make sure createdAt exists.
-         *
-         * Normally @PrePersist on Order will set this,
-         * but we set it here as well because the dispatch
-         * calculation may need it before the first save.
-         */
         if (order.getCreatedAt() == null) {
 
             order.setCreatedAt(
-                    java.time.LocalDateTime.now()
+                    LocalDateTime.now()
             );
         }
 
-        /*
-         * Estimate preparation time.
-         */
         Integer preparationTime =
                 preparationTimeService
                         .estimatePreparationTime(
@@ -113,28 +118,15 @@ public class OrderService
                 preparationTime
         );
 
-        /*
-         * Save the order.
-         */
         Order savedOrder =
                 orderRepository.save(order);
 
-        /*
-         * Try to dispatch.
-         *
-         * The dispatch decision engine may determine
-         * that the rider should wait.
-         */
         var dispatch =
                 dispatchService
                         .automaticallyDispatchOrder(
                                 savedOrder
                         );
 
-        /*
-         * If rider was actually assigned,
-         * update order status.
-         */
         if (dispatch != null) {
 
             savedOrder.setStatus(
@@ -143,9 +135,6 @@ public class OrderService
 
         } else {
 
-            /*
-             * Rider is not dispatched yet.
-             */
             savedOrder.setStatus(
                     "PLACED"
             );
@@ -156,8 +145,17 @@ public class OrderService
         );
     }
 
+
     @Override
-    public Order getOrderById(Long id) {
+    @Transactional(readOnly = true)
+    public Order getOrderById(
+            Long id) {
+
+        if (id == null) {
+            throw new RuntimeException(
+                    "Order id is required"
+            );
+        }
 
         return orderRepository
                 .findById(id)
@@ -167,5 +165,66 @@ public class OrderService
                                         + id
                         )
                 );
+    }
+
+
+    @Override
+    @Transactional
+    public Order saveOrder(
+            Order order) {
+
+        if (order == null ||
+                order.getId() == null) {
+
+            throw new RuntimeException(
+                    "Valid order is required"
+            );
+        }
+
+        return orderRepository.save(
+                order
+        );
+    }
+
+
+    private boolean isBlank(
+            String value) {
+
+        return value == null ||
+                value.isBlank();
+    }
+
+
+    private void validateCoordinates(
+            Double latitude,
+            Double longitude,
+            String locationName) {
+
+        if (latitude == null ||
+                longitude == null) {
+
+            throw new RuntimeException(
+                    locationName +
+                            " location is required"
+            );
+        }
+
+        if (latitude < -90 ||
+                latitude > 90) {
+
+            throw new RuntimeException(
+                    locationName +
+                            " latitude must be between -90 and 90"
+            );
+        }
+
+        if (longitude < -180 ||
+                longitude > 180) {
+
+            throw new RuntimeException(
+                    locationName +
+                            " longitude must be between -180 and 180"
+            );
+        }
     }
 }

@@ -43,28 +43,7 @@ public class Dispatch {
 
     private LocalDateTime deliveredAt;
 
-    /*
-     * ETA calculated for this dispatch.
-     *
-     * This stores the prediction that was shown
-     * to the customer.
-     */
     private LocalDateTime estimatedDeliveryTime;
 
-    /*
-     * Difference between actual delivery time
-     * and predicted delivery time.
-     *
-     * Example:
-     *
-     * ETA      = 11:38
-     * Delivered = 11:42
-     *
-     * etaErrorMinutes = +4
-     *
-     * Positive  -> delivered late
-     * Negative  -> delivered early
-     * Zero      -> exact prediction
-     */
     private Long etaErrorMinutes;
 }
