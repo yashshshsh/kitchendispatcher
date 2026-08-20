@@ -69,6 +69,24 @@ public class DispatchController {
         );
     }
 
+    @GetMapping("/evaluate/{orderId}")
+    public ResponseEntity<Map<String, Object>>
+    evaluateRiders(
+            @PathVariable Long orderId) {
+
+        Order order =
+                orderService.getOrderById(
+                        orderId
+                );
+
+        Map<String, Object> result =
+                riderService.evaluateRiders(
+                        order
+                );
+
+        return ResponseEntity.ok(result);
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<Dispatch> getDispatchById(
             @PathVariable Long id) {

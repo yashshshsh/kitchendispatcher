@@ -1,8 +1,10 @@
 package com.project.kitchen_dispatch.service.interfac;
 
+import com.project.kitchen_dispatch.model.Order;
 import com.project.kitchen_dispatch.model.Rider;
 
 import java.util.List;
+import java.util.Map;
 
 public interface IRiderService {
 
@@ -16,6 +18,10 @@ public interface IRiderService {
             Double kitchenLatitude,
             Double kitchenLongitude
     );
+
+    Rider findBestRider(Order order);
+
+    Map<String, Object> evaluateRiders(Order order);
 
     Rider markRiderUnavailable(Long id);
 

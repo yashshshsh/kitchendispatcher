@@ -26,17 +26,12 @@ public class DispatchScheduler {
     private final IDispatchDecisionService
             dispatchDecisionService;
 
-    private final IDispatchService dispatchService;
+    private final IDispatchService
+            dispatchService;
 
-    private final IRiderService riderService;
+    private final IRiderService
+            riderService;
 
-    /*
-     * Run every 30 seconds.
-     *
-     * This is intentionally small for our first
-     * implementation so we can observe the engine
-     * working during testing.
-     */
     @Scheduled(fixedDelay = 30000)
     @Transactional
     public void processPendingOrders() {
@@ -45,7 +40,6 @@ public class DispatchScheduler {
                 orderRepository.findByStatus("PLACED");
 
         if (pendingOrders.isEmpty()) {
-
             return;
         }
 
@@ -63,60 +57,78 @@ public class DispatchScheduler {
             } catch (Exception e) {
 
                 log.error(
-                        "Failed to process dispatch for order {}: {}",
+                        "Failed to process dispatch for order {}",
                         order.getId(),
-                        e.getMessage()
+                        e
                 );
             }
         }
     }
 
-    private void processOrder(
-            Order order) {
+    private void processOrder(Order order) {
 
-        /*
-         * Find the current nearest available rider.
-         *
-         * We do this every scheduler cycle instead
-         * of remembering a rider from order creation.
-         *
-         * This is important because rider availability
-         * can change.
-         */
-        Rider rider;
+        if (order == null) {
+            return;
+        }
 
-        try {
+        if (order.getKitchen() == null) {
 
-            if (order.getKitchen() == null ||
-                    order.getKitchen().getLatitude() == null ||
-                    order.getKitchen().getLongitude() == null) {
-
-                log.warn(
-                        "Order {} cannot be dispatched: kitchen location missing",
-                        order.getId()
-                );
-
-                return;
-            }
-
-            rider =
-                    riderService.findNearestRider(
-                            order.getKitchen().getLatitude(),
-                            order.getKitchen().getLongitude()
-                    );
-
-        } catch (RuntimeException e) {
-
-            log.info(
-                    "Order {} waiting for an available rider",
+            log.warn(
+                    "Order {} cannot be dispatched: kitchen missing",
                     order.getId()
             );
 
             return;
         }
 
+        if (order.getKitchen().getLatitude() == null ||
+                order.getKitchen().getLongitude() == null) {
+
+            log.warn(
+                    "Order {} cannot be dispatched: kitchen location missing",
+                    order.getId()
+            );
+
+            return;
+        }
+
+        if (order.getDeliveryLatitude() == null ||
+                order.getDeliveryLongitude() == null) {
+
+            log.warn(
+                    "Order {} cannot be dispatched: delivery location missing",
+                    order.getId()
+            );
+
+            return;
+        }
+
+        Rider rider;
+
+        try {
+
+            /*
+             * Destination-aware rider selection.
+             */
+            rider =
+                    riderService.findBestRider(
+                            order
+                    );
+
+        } catch (RuntimeException e) {
+
+            log.info(
+                    "Order {} waiting for available rider: {}",
+                    order.getId(),
+                    e.getMessage()
+            );
+
+            return;
+        }
+
         /*
-         * Calculate when this rider should leave.
+         * Calculate optimal dispatch time for
+         * the selected rider.
          */
         LocalDateTime recommendedDispatchTime =
                 dispatchDecisionService
@@ -129,23 +141,22 @@ public class DispatchScheduler {
                 LocalDateTime.now();
 
         /*
-         * Rider should wait.
+         * Food isn't ready soon enough.
          */
         if (recommendedDispatchTime.isAfter(now)) {
 
             log.info(
-                    "Order {} waiting. Recommended dispatch time: {}",
+                    "Order {} waiting until {}. Selected rider: {}",
                     order.getId(),
-                    recommendedDispatchTime
+                    recommendedDispatchTime,
+                    rider.getId()
             );
 
             return;
         }
 
         /*
-         * The optimal dispatch time has arrived.
-         *
-         * Assign the rider.
+         * Dispatch time has arrived.
          */
         Dispatch dispatch =
                 createDispatch(
@@ -174,10 +185,6 @@ public class DispatchScheduler {
 
         try {
 
-            /*
-             * Reuse the existing dispatch service
-             * validation and rider assignment logic.
-             */
             Dispatch dispatch =
                     Dispatch.builder()
                             .order(order)
@@ -191,8 +198,9 @@ public class DispatchScheduler {
         } catch (RuntimeException e) {
 
             log.warn(
-                    "Could not dispatch order {}: {}",
+                    "Could not dispatch order {} to rider {}: {}",
                     order.getId(),
+                    rider.getId(),
                     e.getMessage()
             );
 
