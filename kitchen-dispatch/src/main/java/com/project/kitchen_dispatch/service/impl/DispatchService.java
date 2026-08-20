@@ -5,6 +5,7 @@ import com.project.kitchen_dispatch.model.Kitchen;
 import com.project.kitchen_dispatch.model.Order;
 import com.project.kitchen_dispatch.model.Rider;
 import com.project.kitchen_dispatch.repository.DispatchRepository;
+import com.project.kitchen_dispatch.service.interfac.IDispatchDecisionService;
 import com.project.kitchen_dispatch.service.interfac.IDispatchService;
 import com.project.kitchen_dispatch.service.interfac.IRiderService;
 import lombok.RequiredArgsConstructor;
@@ -15,14 +16,20 @@ import java.time.LocalDateTime;
 
 @Service
 @RequiredArgsConstructor
-public class DispatchService implements IDispatchService {
+public class DispatchService
+        implements IDispatchService {
 
     private final DispatchRepository dispatchRepository;
+
     private final IRiderService riderService;
+
+    private final IDispatchDecisionService
+            dispatchDecisionService;
 
     @Override
     @Transactional
-    public Dispatch createDispatch(Dispatch dispatch) {
+    public Dispatch createDispatch(
+            Dispatch dispatch) {
 
         if (dispatch == null) {
             throw new RuntimeException(
@@ -85,7 +92,9 @@ public class DispatchService implements IDispatchService {
         );
 
         Dispatch savedDispatch =
-                dispatchRepository.save(dispatch);
+                dispatchRepository.save(
+                        dispatch
+                );
 
         riderService.markRiderUnavailable(
                 rider.getId()
@@ -95,14 +104,17 @@ public class DispatchService implements IDispatchService {
     }
 
     @Override
-    public Dispatch getDispatchById(Long id) {
+    public Dispatch getDispatchById(
+            Long id) {
 
-        return dispatchRepository.findById(id)
+        return dispatchRepository
+                .findById(id)
                 .orElseThrow(() ->
                         new RuntimeException(
                                 "Dispatch not found with id: "
                                         + id
-                        ));
+                        )
+                );
     }
 
     @Override
@@ -165,7 +177,33 @@ public class DispatchService implements IDispatchService {
         }
 
         /*
-         * Create dispatch.
+         * Ask the Dispatch Decision Engine
+         * when this rider should actually
+         * be dispatched.
+         */
+        LocalDateTime optimalDispatchTime =
+                dispatchDecisionService
+                        .calculateOptimalDispatchTime(
+                                order,
+                                rider
+                        );
+
+        LocalDateTime now =
+                LocalDateTime.now();
+
+        /*
+         * If food will be ready later and
+         * the rider does not need to leave yet,
+         * don't assign the rider.
+         */
+        if (optimalDispatchTime.isAfter(now)) {
+
+            return null;
+        }
+
+        /*
+         * Food will be ready soon enough.
+         * Assign the rider now.
          */
         Dispatch dispatch =
                 Dispatch.builder()
@@ -178,7 +216,9 @@ public class DispatchService implements IDispatchService {
                         .build();
 
         Dispatch savedDispatch =
-                dispatchRepository.save(dispatch);
+                dispatchRepository.save(
+                        dispatch
+                );
 
         /*
          * Rider is now busy.

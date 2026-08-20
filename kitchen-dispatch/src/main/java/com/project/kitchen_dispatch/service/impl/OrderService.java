@@ -13,18 +13,25 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
-public class OrderService implements IOrderService {
+public class OrderService
+        implements IOrderService {
 
     private final OrderRepository orderRepository;
+
     private final IKitchenService kitchenService;
+
     private final IDispatchService dispatchService;
-    private final IPreparationTimeService preparationTimeService;
+
+    private final IPreparationTimeService
+            preparationTimeService;
 
     @Override
     @Transactional
-    public Order createOrder(Order order) {
+    public Order createOrder(
+            Order order) {
 
         if (order == null) {
+
             throw new RuntimeException(
                     "Order is required"
             );
@@ -39,17 +46,15 @@ public class OrderService implements IOrderService {
         }
 
         /*
-         * Load the actual Kitchen from the database.
-         *
-         * Do not directly use the Kitchen object sent
-         * inside the JSON request.
+         * Load the actual Kitchen from DB.
          */
         Kitchen kitchen =
                 kitchenService.getKitchenById(
                         order.getKitchen().getId()
                 );
 
-        if (!Boolean.TRUE.equals(kitchen.getActive())) {
+        if (!Boolean.TRUE.equals(
+                kitchen.getActive())) {
 
             throw new RuntimeException(
                     "Kitchen is inactive"
@@ -65,12 +70,12 @@ public class OrderService implements IOrderService {
         }
 
         /*
-         * Attach the managed Kitchen entity.
+         * Attach managed Kitchen entity.
          */
         order.setKitchen(kitchen);
 
         /*
-         * New orders always start as PLACED.
+         * Every new order starts as PLACED.
          */
         order.setStatus("PLACED");
 
@@ -79,7 +84,9 @@ public class OrderService implements IOrderService {
          */
         Integer preparationTime =
                 preparationTimeService
-                        .estimatePreparationTime(order);
+                        .estimatePreparationTime(
+                                order
+                        );
 
         if (preparationTime == null ||
                 preparationTime <= 0) {
@@ -94,33 +101,59 @@ public class OrderService implements IOrderService {
         );
 
         /*
-         * Save the order first.
+         * Save order.
          */
         Order savedOrder =
                 orderRepository.save(order);
 
         /*
-         * Automatically find and assign a rider.
+         * Try dispatching the order.
+         *
+         * The Dispatch Decision Engine may decide
+         * that the rider should wait.
          */
-        dispatchService.automaticallyDispatchOrder(
-                savedOrder
-        );
+        var dispatch =
+                dispatchService
+                        .automaticallyDispatchOrder(
+                                savedOrder
+                        );
 
         /*
-         * Dispatch was successful.
+         * If a rider was actually assigned,
+         * update order status.
          */
-        savedOrder.setStatus("ASSIGNED");
+        if (dispatch != null) {
 
-        return orderRepository.save(savedOrder);
+            savedOrder.setStatus(
+                    "ASSIGNED"
+            );
+
+        } else {
+
+            /*
+             * Rider should not be assigned yet.
+             */
+            savedOrder.setStatus(
+                    "PLACED"
+            );
+        }
+
+        return orderRepository.save(
+                savedOrder
+        );
     }
 
     @Override
-    public Order getOrderById(Long id) {
+    public Order getOrderById(
+            Long id) {
 
-        return orderRepository.findById(id)
+        return orderRepository
+                .findById(id)
                 .orElseThrow(() ->
                         new RuntimeException(
-                                "Order not found with id: " + id
-                        ));
+                                "Order not found with id: "
+                                        + id
+                        )
+                );
     }
 }
