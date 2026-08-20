@@ -12,7 +12,12 @@ public interface IRiderService {
 
     List<Rider> getAvailableRiders();
 
-    Rider findNearestRider(Double kitchenLatitude, Double kitchenLongitude);
+    Rider findNearestRider(
+            Double kitchenLatitude,
+            Double kitchenLongitude
+    );
 
     Rider markRiderUnavailable(Long id);
+
+    Rider markRiderAvailable(Long id);
 }

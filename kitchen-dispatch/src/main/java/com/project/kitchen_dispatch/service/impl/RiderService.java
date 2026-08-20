@@ -5,10 +5,10 @@ import com.project.kitchen_dispatch.repository.RiderRepository;
 import com.project.kitchen_dispatch.service.interfac.IRiderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Comparator;
 import java.util.List;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
@@ -106,20 +106,28 @@ public class RiderService implements IRiderService {
 
     @Override
     @Transactional
-    public void markRiderUnavailable(
+    public Rider markRiderUnavailable(
             Long riderId) {
 
         Rider rider =
                 getRiderById(riderId);
 
+        if (!Boolean.TRUE.equals(
+                rider.getAvailable())) {
+
+            throw new RuntimeException(
+                    "Rider is already unavailable"
+            );
+        }
+
         rider.setAvailable(false);
 
-        riderRepository.save(rider);
+        return riderRepository.save(rider);
     }
 
     @Override
     @Transactional
-    public void markRiderAvailable(
+    public Rider markRiderAvailable(
             Long riderId) {
 
         Rider rider =
@@ -135,30 +143,6 @@ public class RiderService implements IRiderService {
 
         rider.setAvailable(true);
 
-        riderRepository.save(rider);
-    }
-
-    @Override
-    public Rider markRiderUnavailable(Long id) {
-
-        Rider rider =
-                riderRepository.findById(id)
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Rider not found with id: "
-                                                + id
-                                ));
-
-        if (!Boolean.TRUE.equals(
-                rider.getAvailable())) {
-
-            throw new RuntimeException(
-                    "Rider is already unavailable"
-            );
-        }
-
-        rider.setAvailable(false);
-
         return riderRepository.save(rider);
     }
 
@@ -171,10 +155,14 @@ public class RiderService implements IRiderService {
         final double EARTH_RADIUS_KM = 6371.0;
 
         double latDistance =
-                Math.toRadians(lat2 - lat1);
+                Math.toRadians(
+                        lat2 - lat1
+                );
 
         double lonDistance =
-                Math.toRadians(lon2 - lon1);
+                Math.toRadians(
+                        lon2 - lon1
+                );
 
         double a =
                 Math.sin(latDistance / 2)
@@ -183,11 +171,18 @@ public class RiderService implements IRiderService {
                         Math.cos(
                                 Math.toRadians(lat1)
                         )
-                                * Math.cos(
-                                Math.toRadians(lat2)
-                        )
-                                * Math.sin(lonDistance / 2)
-                                * Math.sin(lonDistance / 2);
+                                *
+                                Math.cos(
+                                        Math.toRadians(lat2)
+                                )
+                                *
+                                Math.sin(
+                                        lonDistance / 2
+                                )
+                                *
+                                Math.sin(
+                                        lonDistance / 2
+                                );
 
         double c =
                 2 * Math.atan2(
