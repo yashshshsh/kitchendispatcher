@@ -6,6 +6,8 @@ import com.project.kitchen_dispatch.service.interfac.IRiderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 @RequiredArgsConstructor
 public class RiderService implements IRiderService {
@@ -21,6 +23,13 @@ public class RiderService implements IRiderService {
     public Rider getRiderById(Long id) {
         return riderRepository.findById(id)
                 .orElseThrow(() ->
-                        new RuntimeException("Rider not found with id: " + id));
+                        new RuntimeException(
+                                "Rider not found with id: " + id
+                        ));
+    }
+
+    @Override
+    public List<Rider> getAvailableRiders() {
+        return riderRepository.findByAvailableTrueAndActiveTrue();
     }
 }
